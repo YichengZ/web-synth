@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRISM - Organic Light Physics Synth (96kHz)</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        body { margin: 0; background-color: #020617; color: #fff; }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script type="text/babel">
+    // --- REACT HOOKS DESTRUCTURING (Fix for ReferenceError) ---
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // --- BUILT-IN ICONS (Replaces external Lucide dependency for stability) ---
+    const IconBase = ({ children, ...props }) => (
+        <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            width="24" 
+            height="24" 
+            viewBox="0 0 24 24" 
+            fill="none" 
+            stroke="currentColor" 
+            strokeWidth="2" 
+            strokeLinecap="round" 
+            strokeLinejoin="round" 
+            {...props}
+        >
+            {children}
+        </svg>
+    );
+
+    const Icons = {
+        Play: (props) => <IconBase {...props}><polygon points="5 3 19 12 5 21 5 3"/></IconBase>,
+        Dice5: (props) => <IconBase {...props}><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="M16 8h.01"/><path d="M8 8h.01"/><path d="M8 16h.01"/><path d="M16 16h.01"/><path d="M12 12h.01"/></IconBase>,
+        Download: (props) => <IconBase {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></IconBase>,
+        Lock: (props) => <IconBase {...props}><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></IconBase>,
+        Unlock: (props) => <IconBase {...props}><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></IconBase>,
+        Sparkles: (props) => <IconBase {...props}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 3v4"/><path d="M3 5h4"/><path d="M3 9h4"/></IconBase>,
+        Sun: (props) => <IconBase {...props}><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></IconBase>,
+        Hexagon: (props) => <IconBase {...props}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></IconBase>,
+        Aperture: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"/><path d="m14.31 8 5.74 9.94"/><path d="M9.69 8h11.48"/><path d="m7.38 12 5.74-9.94"/><path d="M9.69 16 3.95 6.06"/><path d="M14.31 16H2.83"/><path d="m16.62 12-5.74 9.94"/></IconBase>,
+        Activity: (props) => <IconBase {...props}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></IconBase>,
+        Settings2: (props) => <IconBase {...props}><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></IconBase>,
+        Moon: (props) => <IconBase {...props}><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></IconBase>,
+        Stars: (props) => <IconBase {...props}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M7 6h.01"/><path d="M4 8h.01"/></IconBase>,
+        Wind: (props) => <IconBase {...props}><path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/><path d="M9.6 4.6A2 2 0 1 1 11 8H2"/><path d="M12.6 19.4A2 2 0 1 0 14 16H2"/></IconBase>,
+        Zap: (props) => <IconBase {...props}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></IconBase>,
+        Waves: (props) => <IconBase {...props}><path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/></IconBase>,
+        Disc: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></IconBase>,
+        Snowflake: (props) => <IconBase {...props}><line x1="2" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="22"/><path d="m20 16-4-4 4-4"/><path d="m4 8 4 4-4 4"/><path d="m16 4-4 4-4-4"/><path d="m8 20 4-4 4 4"/></IconBase>,
+        Radio: (props) => <IconBase {...props}><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></IconBase>,
+        Bell: (props) => <IconBase {...props}><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></IconBase>,
+    };
+
+    const { Play, Dice5, Download, Lock, Unlock, Sparkles, Sun, Hexagon, Aperture, Activity, Settings2, Moon, Stars, Wind, Zap, Waves, Disc, Snowflake, Radio, Bell } = Icons;
+
+    // --- DSP HELPERS (High Precision & Modulation) ---
+
+    // 1. High-Shelf Shimmer Reverb Impulse
+    const createShimmerBuffer = (ctx, duration = 4.0, decay = 3.0) => {
+      const sampleRate = ctx.sampleRate;
+      const length = sampleRate * duration;
+      const impulse = ctx.createBuffer(2, length, sampleRate);
+      const left = impulse.getChannelData(0);
+      const right = impulse.getChannelData(1);
+      for (let i = 0; i < length; i++) {
+        const n = i / length;
+        const env = Math.pow(1 - n, decay);
+        const noise = (Math.random() * 2 - 1);
+        left[i] = noise * env;
+        right[i] = (Math.random() * 2 - 1) * env;
+      }
+      return impulse;
+    };
+
+    // 2. Stereo Panner Helper
+    const createPanner = (ctx, panValue) => {
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = Math.max(-1, Math.min(1, panValue));
+      return panner;
+    };
+
+    // 3. ORGANIC LFO HELPER (Enhanced)
+    // Creates a complex, evolving control signal by summing two LFOs at different rates
+    const createOrganicLFO = (ctx, targetParam, startTime, duration, depth, speed = 1) => {
+      if (depth === 0) return;
+
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      // Prime numbers for rates create long non-repeating patterns
+      // Scaled by 'speed' (Movement)
+      osc1.frequency.value = 0.1 * speed; 
+      osc2.frequency.value = 0.17 * speed; 
+      
+      osc1.type = 'sine';
+      osc2.type = 'triangle';
+
+      gain.gain.value = depth;
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(targetParam);
+
+      osc1.start(startTime);
+      osc2.start(startTime);
+      osc1.stop(startTime + duration);
+      osc2.stop(startTime + duration);
+    };
+
+    // --- PHYSICS ENGINES (Now with Organic Modulation) ---
+
+    // ENGINE A: PRISM (Drifting Crystal)
+    const enginePrism = (ctx, dest, t, p) => {
+      const ratios = [1, 1.618, 2.618, 4.236, 6.854, 11.09, 17.9];
+      
+      ratios.forEach((ratio, i) => {
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        const panner = createPanner(ctx, (Math.random() * 2 - 1) * p.width * 0.5);
+
+        // Initial Detune based on Timbre
+        const staticDetune = (i * p.timbre * 5); 
+        osc.frequency.setValueAtTime(p.pitch * ratio, t);
+        osc.detune.setValueAtTime(staticDetune, t);
+        osc.type = 'sine';
+
+        // ORGANIC DRIFT: Modulate Pitch (Detune)
+        // Higher partials drift more
+        createOrganicLFO(ctx, osc.detune, t, p.duration + 2, p.drift * 80 * (i + 1), p.movement * 2);
+
+        // ORGANIC PANNING: Subtle stereo movement
+        createOrganicLFO(ctx, panner.pan, t, p.duration + 2, p.drift * 0.8, p.movement * 0.5);
+
+        // Exciter
+        if (p.impact > 0.05 && i > 2) {
+          const pop = ctx.createOscillator();
+          const popEnv = ctx.createGain();
+          pop.frequency.value = p.pitch * ratio * 4;
+          popEnv.gain.setValueAtTime(p.impact * 0.2, t);
+          popEnv.gain.exponentialRampToValueAtTime(0.001, t + 0.005);
+          pop.connect(popEnv);
+          popEnv.connect(osc.frequency);
+          pop.start(t);
+          pop.stop(t + 0.1);
+        }
+
+        const damping = Math.pow(ratio, 1.5 - (p.timbre * 0.5)); 
+        const decayTime = p.duration / damping; 
+        
+        env.gain.setValueAtTime(0, t);
+        env.gain.linearRampToValueAtTime(0.5 / Math.sqrt(i + 1), t + 0.005);
+        env.gain.exponentialRampToValueAtTime(0.0001, t + decayTime);
+
+        osc.connect(env);
+        env.connect(panner);
+        panner.connect(dest);
+        osc.start(t);
+        osc.stop(t + decayTime + 0.5); // Extended stop for LFO tails
+      });
+    };
+
+    // ENGINE B: CHIME (Windy Rods)
+    const engineChime = (ctx, dest, t, p) => {
+      const rodCount = 5 + Math.floor(p.timbre * 5);
+      
+      for(let i=0; i<rodCount; i++) {
+        // Drift affects timing randomness
+        const delayVariation = Math.random() * p.drift * 0.5;
+        const delay = (Math.random() * p.duration * 0.5 * (1 - p.impact)) + delayVariation;
+        
+        const pentatonic = [1, 1.125, 1.25, 1.5, 1.66]; 
+        const scale = pentatonic[Math.floor(Math.random() * pentatonic.length)];
+        const baseFreq = p.pitch * scale;
+        
+        [1, 2.7, 5.2].forEach((ratio, k) => {
+            const osc = ctx.createOscillator();
+            const env = ctx.createGain();
+            const panner = createPanner(ctx, (Math.random() * 2 - 1) * p.width);
+
+            osc.frequency.value = baseFreq * ratio;
+            osc.type = 'sine';
+            
+            // Tremolo LFO (Volume modulation) simulating wind
+            const tremolo = ctx.createGain();
+            tremolo.gain.value = 1;
+            createOrganicLFO(ctx, tremolo.gain, t, p.duration + 2, p.drift * 0.4, p.movement * 3);
+
+            const startTime = t + delay;
+            const dur = (p.duration * 0.5) / ratio;
+
+            env.gain.setValueAtTime(0, startTime);
+            env.gain.linearRampToValueAtTime(0.15 / (k+1), startTime + 0.01);
+            env.gain.exponentialRampToValueAtTime(0.001, startTime + dur);
+
+            osc.connect(tremolo);
+            tremolo.connect(env);
+            env.connect(panner);
+            panner.connect(dest);
+            osc.start(startTime);
+            osc.stop(startTime + dur + 1.0);
+        });
+      }
+    };
+
+    // ENGINE C: HALO (Breathing Glass)
+    const engineHalo = (ctx, dest, t, p) => {
+      const layers = 4;
+      for(let i=0; i<layers; i++) {
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        const panner = createPanner(ctx, (Math.random() * 2 - 1) * p.width);
+
+        const harmonic = i + 1;
+        const freq = p.pitch * harmonic * (1 + (i % 2 === 0 ? 1 : -1) * p.timbre * 0.02);
+        
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+
+        // Massive Organic Pitch Drift (The "Halo" effect)
+        // Drift controls depth, Movement controls speed
+        createOrganicLFO(ctx, osc.frequency, t, p.duration + 3, freq * p.drift * 0.03, p.movement * 1.5);
+
+        const attack = 0.5 + (1 - p.impact) * 1.0; 
+        
+        env.gain.setValueAtTime(0, t);
+        env.gain.exponentialRampToValueAtTime(0.2 / layers, t + attack);
+        env.gain.exponentialRampToValueAtTime(0.001, t + p.duration + 1.0);
+
+        // Vibrato
+        const vib = ctx.createOscillator();
+        const vibGain = ctx.createGain();
+        vib.frequency.value = 4 + Math.random() * 2 + (p.movement * 5); // Movement speeds up vibrato
+        vibGain.gain.value = freq * (0.005 + p.drift * 0.02); 
+        vib.connect(vibGain);
+        vibGain.connect(osc.frequency);
+        vib.start(t);
+        vib.stop(t + p.duration + 1.0);
+
+        osc.connect(env);
+        env.connect(panner);
+        panner.connect(dest);
+        osc.start(t);
+        osc.stop(t + p.duration + 2.0);
+      }
+    };
+
+    // ENGINE D: GLINT (Scattering Light)
+    const engineGlint = (ctx, dest, t, p) => {
+      const particles = 20 + Math.floor(p.timbre * 60);
+      
+      for(let i=0; i<particles; i++) {
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        // Pan position drifts intensely
+        const panner = createPanner(ctx, (Math.random() * 2 - 1) * p.width);
+        createOrganicLFO(ctx, panner.pan, t, p.duration, p.drift, p.movement * 2);
+
+        // Random Pitch offset based on Drift
+        const driftOffset = (Math.random() - 0.5) * p.drift * 800;
+        const freq = p.pitch * (2 + Math.random() * 6) + driftOffset; 
+        
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+
+        const startTime = t + Math.random() * p.duration * 0.8;
+        const dur = 0.05 + (Math.random() * 0.1); 
+
+        env.gain.setValueAtTime(0, startTime);
+        env.gain.linearRampToValueAtTime(0.05 * p.impact, startTime + 0.005);
+        env.gain.exponentialRampToValueAtTime(0.0001, startTime + dur);
+
+        osc.connect(env);
+        env.connect(panner);
+        panner.connect(dest);
+        osc.start(startTime);
+        osc.stop(startTime + dur + 0.1);
+      }
+    };
+
+    // ENGINE E: LUMEN (Liquid Light / Swell)
+    const engineLumen = (ctx, dest, t, p) => {
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const env = ctx.createGain();
+      const panner = createPanner(ctx, 0);
+
+      // Slight detune for warmth
+      osc1.frequency.value = p.pitch;
+      osc2.frequency.value = p.pitch * 1.002;
+      osc1.type = 'sine';
+      osc2.type = 'triangle'; // Richer harmonic content
+
+      // Organic Drift on Pitch
+      createOrganicLFO(ctx, osc1.frequency, t, p.duration + 2, p.drift * 20, p.movement);
+      createOrganicLFO(ctx, osc2.frequency, t, p.duration + 2, p.drift * 30, p.movement * 1.2);
+
+      // Slow swell envelope
+      const attack = p.duration * 0.4;
+      env.gain.setValueAtTime(0, t);
+      env.gain.linearRampToValueAtTime(0.3, t + attack);
+      env.gain.exponentialRampToValueAtTime(0.001, t + p.duration);
+
+      // Dynamic Lowpass Filter (The "Liquid" part)
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.value = 2 + p.timbre * 5;
+      filter.frequency.setValueAtTime(500, t);
+      
+      // Filter sweep modulated by Movement
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfo.frequency.value = 0.2 + (p.movement * 2); 
+      lfoGain.gain.value = 1000 + (p.impact * 2000);
+      lfo.connect(lfoGain);
+      lfoGain.connect(filter.frequency);
+      lfo.start(t);
+      lfo.stop(t+p.duration);
+
+      osc1.connect(filter);
+      osc2.connect(filter);
+      filter.connect(env);
+      env.connect(panner);
+      panner.connect(dest);
+
+      osc1.start(t);
+      osc2.start(t);
+      osc1.stop(t + p.duration + 0.5);
+      osc2.stop(t + p.duration + 0.5);
+    };
+
+    // ENGINE F: SHARD (Broken Glass / Granular Chaos)
+    const engineShard = (ctx, dest, t, p) => {
+      const shards = 8 + Math.floor(p.timbre * 12);
+      
+      for(let i=0; i<shards; i++) {
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        const panner = createPanner(ctx, (Math.random() * 2 - 1) * p.width);
+
+        // High, dissonant ratios
+        const ratio = 1 + Math.random() * 5;
+        const freq = p.pitch * ratio;
+        
+        // FM Synthesis for "Hard" glass texture
+        const mod = ctx.createOscillator();
+        const modGain = ctx.createGain();
+        mod.frequency.value = freq * 2.5;
+        modGain.gain.value = freq * p.impact; // Impact controls hardness
+        mod.connect(modGain);
+        modGain.connect(osc.frequency);
+        mod.start(t);
+        mod.stop(t + p.duration);
+
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+
+        // Staggered starts based on Drift (Chaos)
+        const start = t + (Math.random() * p.drift * 0.5);
+        const dur = 0.05 + (Math.random() * 0.2);
+
+        env.gain.setValueAtTime(0, start);
+        env.gain.linearRampToValueAtTime(0.2 / shards, start + 0.005);
+        env.gain.exponentialRampToValueAtTime(0.001, start + dur);
+
+        osc.connect(env);
+        env.connect(panner);
+        panner.connect(dest);
+        
+        osc.start(start);
+        osc.stop(start + dur + 0.1);
+      }
+    };
+
+    // ENGINE G: AURA (Resonant Drone)
+    const engineAura = (ctx, dest, t, p) => {
+      // Additive Synthesis + Resonant Filter Bank
+      const harmonics = [1, 2, 3, 5];
+      
+      // Comb filter to create "Aura" ring
+      const delay = ctx.createDelay();
+      delay.delayTime.value = 1 / p.pitch; // Tuned delay
+      const fb = ctx.createGain();
+      fb.gain.value = 0.7 + (p.timbre * 0.2); // Timbre controls resonance
+      
+      // Drift modulates the Aura pitch
+      createOrganicLFO(ctx, delay.delayTime, t, p.duration, 0.001 * p.drift, p.movement);
+
+      const masterEnv = ctx.createGain();
+      masterEnv.gain.setValueAtTime(0, t);
+      masterEnv.gain.linearRampToValueAtTime(0.4, t + 1.0);
+      masterEnv.gain.exponentialRampToValueAtTime(0.001, t + p.duration);
+
+      harmonics.forEach(h => {
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        osc.frequency.value = p.pitch * h;
+        osc.type = 'sine';
+        
+        // Slow amplitude modulation (pulsing)
+        const am = ctx.createOscillator();
+        const amGain = ctx.createGain();
+        am.frequency.value = 0.5 + (Math.random() * p.movement);
+        amGain.gain.value = 0.5;
+        
+        env.gain.value = 0.2 / harmonics.length;
+        
+        osc.connect(env);
+        env.connect(delay); // Send to comb filter
+        
+        osc.start(t);
+        osc.stop(t + p.duration);
+        am.start(t);
+        am.stop(t + p.duration);
+      });
+
+      // Comb filter loop
+      delay.connect(fb);
+      fb.connect(delay);
+      
+      delay.connect(masterEnv);
+      masterEnv.connect(dest);
+    };
+
+    // ENGINE H: WHOOSH (Noise Sweep / Transition)
+    // Independent Module for generic transitions
+    const engineWhoosh = (ctx, dest, t, p) => {
+        const bufferSize = ctx.sampleRate * p.duration;
+        const buffer = ctx.createBuffer(2, bufferSize, ctx.sampleRate);
+        for (let c = 0; c < 2; c++) {
+            const data = buffer.getChannelData(c);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = (Math.random() * 2 - 1) * 0.5;
+            }
+        }
+        const noise = ctx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.Q.value = 0.5 + (p.timbre * 10); 
+
+        const startFreq = 50; 
+        const peakFreq = p.pitch * 3 + 200; 
+        const midTime = t + (p.duration * 0.5);
+        
+        filter.frequency.setValueAtTime(startFreq, t);
+        filter.frequency.exponentialRampToValueAtTime(peakFreq, midTime); 
+        filter.frequency.exponentialRampToValueAtTime(startFreq, t + p.duration); 
+
+        const env = ctx.createGain();
+        env.gain.setValueAtTime(0, t);
+        env.gain.linearRampToValueAtTime(1.0 * p.impact, midTime); 
+        env.gain.linearRampToValueAtTime(0.001, t + p.duration); 
+
+        const panner = ctx.createStereoPanner();
+        if (p.movement > 0.1) {
+            const range = p.movement; 
+            panner.pan.setValueAtTime(-range, t);
+            panner.pan.linearRampToValueAtTime(range, t + p.duration);
+        } else {
+            panner.pan.setValueAtTime(0, t);
+        }
+
+        noise.connect(filter);
+        filter.connect(env);
+        env.connect(panner);
+        panner.connect(dest);
+
+        noise.start(t);
+        noise.stop(t + p.duration + 0.2);
+    };
+
+    // ENGINE J: IMPACT (Anime Combat Hit / Explosion)
+    const engineImpact = (ctx, dest, t, p) => {
+        // 1. Sub Bass Drop (The Body)
+        const sub = ctx.createOscillator();
+        const subEnv = ctx.createGain();
+        const dropSpeed = 0.1 + (1 - p.impact) * 0.4;
+        
+        sub.frequency.setValueAtTime(p.pitch, t);
+        sub.frequency.exponentialRampToValueAtTime(20, t + dropSpeed); // Fast Drop
+        sub.type = 'sine';
+
+        subEnv.gain.setValueAtTime(1.0, t);
+        subEnv.gain.exponentialRampToValueAtTime(0.001, t + dropSpeed + 0.2);
+
+        // 2. Noise Burst (The Crunch)
+        const bufSize = ctx.sampleRate * 0.5;
+        const buffer = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for(let i=0; i<bufSize; i++) data[i] = (Math.random()*2-1);
+        const noise = ctx.createBufferSource();
+        noise.buffer = buffer;
+
+        const noiseFilter = ctx.createBiquadFilter();
+        noiseFilter.type = 'lowpass';
+        // Timbre controls brightness/distortion feel
+        noiseFilter.frequency.setValueAtTime(500 + p.timbre * 8000, t);
+        noiseFilter.frequency.exponentialRampToValueAtTime(100, t + 0.2);
+
+        const noiseEnv = ctx.createGain();
+        noiseEnv.gain.setValueAtTime(p.impact, t);
+        noiseEnv.gain.exponentialRampToValueAtTime(0.001, t + 0.15); // Short burst
+
+        // 3. Distortion (Grit)
+        const shaper = ctx.createWaveShaper();
+        const curve = new Float32Array(44100);
+        const k = 100 * p.timbre;
+        for (let i = 0; i < 44100; ++i) {
+            const x = (i * 2) / 44100 - 1;
+            curve[i] = (3 + k) * x * 20 * (Math.PI / 180) / (Math.PI + k * Math.abs(x));
+        }
+        shaper.curve = curve;
+
+        const mix = ctx.createGain();
+        
+        // Panning spread for explosion
+        const panner = ctx.createStereoPanner();
+        panner.pan.value = (Math.random() * 2 - 1) * p.movement * 0.5;
+
+        sub.connect(subEnv);
+        subEnv.connect(mix);
+        
+        noise.connect(noiseFilter);
+        noiseFilter.connect(noiseEnv);
+        noiseEnv.connect(shaper); // Distort only the noise
+        shaper.connect(mix);
+
+        mix.connect(panner);
+        panner.connect(dest);
+
+        sub.start(t);
+        sub.stop(t + 1.0);
+        noise.start(t);
+        noise.stop(t + 1.0);
+    };
+
+    // ENGINE K: CHARGE (Power Up / Energy Gathering)
+    const engineCharge = (ctx, dest, t, p) => {
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        const panner = createPanner(ctx, 0); // Start center
+
+        // 1. Rising Pitch (Shepard-like feel)
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(p.pitch, t);
+        // Exponential rise
+        osc.frequency.exponentialRampToValueAtTime(p.pitch * 4, t + p.duration);
+
+        // 2. Accelerating Filter LFO (The "WubWub" getting faster)
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.Q.value = 5 + p.timbre * 15; // High resonance for "Laser" feel
+
+        // LFO for filter cutoff
+        const lfo = ctx.createOscillator();
+        const lfoGain = ctx.createGain();
+        
+        // LFO Speed Ramping up
+        const startSpeed = 2 + (p.movement * 5);
+        const endSpeed = 20 + (p.movement * 50);
+        lfo.frequency.setValueAtTime(startSpeed, t);
+        lfo.frequency.exponentialRampToValueAtTime(endSpeed, t + p.duration);
+        
+        // Modulation depth
+        lfoGain.gain.value = 500 + (p.impact * 2000);
+
+        // Base cutoff rising
+        filter.frequency.setValueAtTime(200, t);
+        filter.frequency.exponentialRampToValueAtTime(5000, t + p.duration);
+
+        lfo.connect(lfoGain);
+        lfoGain.connect(filter.frequency);
+
+        // 3. Envelope
+        env.gain.setValueAtTime(0, t);
+        env.gain.linearRampToValueAtTime(0.5, t + p.duration); // Fade in
+        env.gain.linearRampToValueAtTime(0.0, t + p.duration + 0.1); // Quick cut
+
+        // 4. Stereo Width widening
+        if (p.width > 0) {
+            // Random shaking
+            createOrganicLFO(ctx, panner.pan, t, p.duration, p.width, 10);
+        }
+
+        osc.connect(filter);
+        filter.connect(env);
+        env.connect(panner);
+        panner.connect(dest);
+
+        osc.start(t);
+        osc.stop(t + p.duration + 0.2);
+        lfo.start(t);
+        lfo.stop(t + p.duration + 0.2);
+    };
+
+    // ENGINE I: STELLA (Kind Glittering Glockenspiel)
+    const engineStella = (ctx, dest, t, p) => {
+      // Layers create the chord/cluster (Timbre controls count)
+      const layers = 3 + Math.floor(p.timbre * 4);
+      // Major Pentatonic / Sweet Intervals
+      const intervals = [1, 1.125, 1.25, 1.5, 1.66, 2.0]; 
+
+      for (let i = 0; i < layers; i++) {
+        const osc = ctx.createOscillator();
+        const env = ctx.createGain();
+        const panner = createPanner(ctx, (Math.random() * 2 - 1) * p.width);
+
+        const ratio = intervals[i % intervals.length] * (1 + Math.floor(i / intervals.length));
+        
+        // Slight drift per star
+        const drift = (Math.random() - 0.5) * p.drift * 20;
+        osc.frequency.setValueAtTime(p.pitch * ratio + drift, t);
+        osc.type = 'sine';
+
+        // FM Attack (Mallet Hit)
+        const fm = ctx.createOscillator();
+        const fmGain = ctx.createGain();
+        fm.frequency.value = p.pitch * ratio * 2.0; // 2:1 for clean metal
+        
+        // Impact controls "Hardness" of the mallet
+        const hardness = p.impact * 1000;
+        fmGain.gain.setValueAtTime(hardness, t);
+        fmGain.gain.exponentialRampToValueAtTime(0.01, t + 0.02);
+        
+        fm.connect(fmGain);
+        fmGain.connect(osc.frequency);
+        fm.start(t);
+        fm.stop(t + p.duration);
+
+        // Staggered arpeggio for "Glitter" feel based on Movement
+        const delay = i * 0.06 * p.movement; 
+        
+        const decay = p.duration / (ratio * 0.5); 
+        
+        env.gain.setValueAtTime(0, t + delay);
+        env.gain.linearRampToValueAtTime(0.3 / layers, t + delay + 0.01);
+        env.gain.exponentialRampToValueAtTime(0.001, t + delay + decay);
+
+        // Subtle panning drift
+        createOrganicLFO(ctx, panner.pan, t, p.duration, p.drift, p.movement);
+
+        osc.connect(env);
+        env.connect(panner);
+        panner.connect(dest);
+        osc.start(t + delay);
+        osc.stop(t + delay + decay + 0.1);
+      }
+    };
+
+
+    // --- MASTER EFFECTS CHAIN (Distinct Signal Paths) ---
+    const applyMasterFX = (ctx, input, params) => {
+      const t = ctx.currentTime;
+      const engine = params.engine;
+
+      // 1. UNIQUE SIGNAL CHAINS PER ENGINE
+      let chainOut = input;
+
+      // CHAIN X: WHOOSH / IMPACT / CHARGE (Bypass or specific dynamics)
+      if (engine === 'WHOOSH' || engine === 'IMPACT' || engine === 'CHARGE') {
+          // These need raw dynamics, bypass the spectral bloom
+          chainOut = input;
+      }
+      // CHAIN A: LIQUID (LUMEN, HALO)
+      else if (engine === 'LUMEN' || engine === 'HALO') {
+          const phaserLFO = ctx.createOscillator();
+          phaserLFO.frequency.value = 0.2 + (params.movement * 2);
+          const phaserGain = ctx.createGain();
+          phaserGain.gain.value = 0.003; 
+          
+          const allpass1 = ctx.createBiquadFilter(); allpass1.type = 'allpass'; allpass1.frequency.value = 500;
+          const allpass2 = ctx.createBiquadFilter(); allpass2.type = 'allpass'; allpass2.frequency.value = 1500;
+          
+          phaserLFO.connect(phaserGain);
+          phaserGain.connect(allpass1.frequency);
+          phaserGain.connect(allpass2.frequency);
+          phaserLFO.start(t);
+
+          input.connect(allpass1);
+          allpass1.connect(allpass2);
+          
+          const dry = ctx.createGain(); dry.gain.value = 0.6;
+          const wet = ctx.createGain(); wet.gain.value = 0.4;
+          input.connect(dry);
+          allpass2.connect(wet);
+          
+          const merge = ctx.createGain();
+          dry.connect(merge);
+          wet.connect(merge);
+          chainOut = merge;
+      }
+      // CHAIN B: CRYSTAL/SHARD (SHARD, GLINT)
+      else if (engine === 'SHARD' || engine === 'GLINT') {
+          const hpf = ctx.createBiquadFilter();
+          hpf.type = 'highpass';
+          hpf.frequency.value = 400 + (params.timbre * 1000); 
+
+          const delay = ctx.createDelay();
+          delay.delayTime.value = 0.1 + (Math.random() * 0.05 * params.drift);
+          const fb = ctx.createGain();
+          fb.gain.value = 0.4;
+
+          input.connect(hpf);
+          hpf.connect(delay);
+          delay.connect(fb);
+          fb.connect(delay);
+
+          const mix = ctx.createGain();
+          hpf.connect(mix); 
+          delay.connect(mix); 
+          chainOut = mix;
+      }
+      // CHAIN C: RESONANCE/CLEAN (AURA, CHIME, PRISM, STELLA)
+      else {
+          // STELLA needs to be very clean, maybe less filter heavy than PRISM
+          if (engine === 'STELLA') {
+             // Just a light HPF to keep it sparkling
+             const hpf = ctx.createBiquadFilter();
+             hpf.type = 'highpass';
+             hpf.frequency.value = 300;
+             input.connect(hpf);
+             chainOut = hpf;
+          } else {
+             // Moving Resonant Filter (Bloom) for others
+             const filter = ctx.createBiquadFilter();
+             filter.type = 'lowpass';
+             filter.Q.value = 1 + params.timbre * 2;
+             filter.frequency.value = 1000;
+             createOrganicLFO(ctx, filter.frequency, t, params.duration + 5, 2000 * params.drift, 0.5 * params.movement);
+             input.connect(filter);
+             chainOut = filter;
+          }
+      }
+
+
+      // 2. MASTER COMPRESSOR
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -15;
+      comp.ratio.value = 6;
+      
+      // 3. MASTER SHIMMER REVERB
+      const convolver = ctx.createConvolver();
+      const wetGain = ctx.createGain();
+      try {
+        const dur = 2.0 + (params.space * 6.0); 
+        convolver.buffer = createShimmerBuffer(ctx, dur, 3.0); 
+      } catch(e) {}
+      wetGain.gain.value = params.space * 0.8; 
+
+      // Wiring Chain
+      chainOut.connect(comp);
+      
+      comp.connect(ctx.destination);
+      comp.connect(convolver);
+      convolver.connect(wetGain);
+      wetGain.connect(ctx.destination);
+    };
+
+
+    // --- MAIN APP ---
+
+    const PRESETS = {
+      PRISM: { engine: 'PRISM', pitch: 1200, duration: 3.0, timbre: 0.2, impact: 0.8, width: 0.4, space: 0.5, drift: 0.2, movement: 0.3 },
+      CHIME: { engine: 'CHIME', pitch: 1500, duration: 2.5, timbre: 0.6, impact: 0.5, width: 0.9, space: 0.4, drift: 0.4, movement: 0.5 },
+      HALO: { engine: 'HALO', pitch: 880, duration: 5.0, timbre: 0.3, impact: 0.1, width: 0.6, space: 0.8, drift: 0.6, movement: 0.2 },
+      GLINT: { engine: 'GLINT', pitch: 2000, duration: 1.5, timbre: 0.8, impact: 1.0, width: 1.0, space: 0.3, drift: 0.3, movement: 0.8 },
+      LUMEN: { engine: 'LUMEN', pitch: 440, duration: 4.0, timbre: 0.5, impact: 0.2, width: 0.7, space: 0.9, drift: 0.5, movement: 0.7 },
+      SHARD: { engine: 'SHARD', pitch: 1800, duration: 1.2, timbre: 0.9, impact: 0.9, width: 0.8, space: 0.4, drift: 0.7, movement: 0.9 },
+      AURA:  { engine: 'AURA',  pitch: 220, duration: 6.0, timbre: 0.4, impact: 0.1, width: 0.5, space: 1.0, drift: 0.3, movement: 0.1 },
+      WHOOSH:{ engine: 'WHOOSH', pitch: 800, duration: 1.5, timbre: 0.5, impact: 0.8, width: 0.5, space: 0.3, drift: 0.0, movement: 0.9 },
+      STELLA:{ engine: 'STELLA', pitch: 1000, duration: 3.5, timbre: 0.5, impact: 0.6, width: 0.8, space: 0.6, drift: 0.2, movement: 0.5 },
+      IMPACT:{ engine: 'IMPACT', pitch: 150, duration: 1.0, timbre: 0.8, impact: 1.0, width: 0.5, space: 0.4, drift: 0.0, movement: 0.5 },
+      CHARGE:{ engine: 'CHARGE', pitch: 200, duration: 2.5, timbre: 0.7, impact: 0.5, width: 0.5, space: 0.6, drift: 0.0, movement: 0.8 },
+    };
+
+    const CrystalSynth = () => {
+      const audioCtxRef = useRef(null);
+      const analyserRef = useRef(null);
+      const canvasRef = useRef(null);
+      const animationRef = useRef(null);
+
+      const [activePreset, setActivePreset] = useState('PRISM');
+      const [params, setParams] = useState(PRESETS.PRISM);
+      const [lockedParams, setLockedParams] = useState({});
+      const [lastTriggerTime, setLastTriggerTime] = useState(0);
+      const [isExporting, setIsExporting] = useState(false);
+
+      const initAudio = useCallback(() => {
+        if (!audioCtxRef.current) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          const ctx = new AudioContext();
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 2048;
+          analyser.smoothingTimeConstant = 0.85;
+          
+          const masterProxy = ctx.createGain();
+          masterProxy.connect(analyser); 
+          analyser.connect(ctx.destination);
+
+          audioCtxRef.current = ctx;
+          analyserRef.current = analyser;
+        }
+        if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+      }, []);
+
+      // --- SPAWN LOGIC ---
+      const spawnSound = (ctx, destination, p) => {
+        const t = ctx.currentTime;
+        const sourceBus = ctx.createGain();
+        
+        switch (p.engine) {
+          case 'PRISM': enginePrism(ctx, sourceBus, t, p); break;
+          case 'CHIME': engineChime(ctx, sourceBus, t, p); break;
+          case 'HALO': engineHalo(ctx, sourceBus, t, p); break;
+          case 'GLINT': engineGlint(ctx, sourceBus, t, p); break;
+          case 'LUMEN': engineLumen(ctx, sourceBus, t, p); break;
+          case 'SHARD': engineShard(ctx, sourceBus, t, p); break;
+          case 'AURA': engineAura(ctx, sourceBus, t, p); break;
+          case 'WHOOSH': engineWhoosh(ctx, sourceBus, t, p); break;
+          case 'STELLA': engineStella(ctx, sourceBus, t, p); break;
+          case 'IMPACT': engineImpact(ctx, sourceBus, t, p); break;
+          case 'CHARGE': engineCharge(ctx, sourceBus, t, p); break;
+          default: enginePrism(ctx, sourceBus, t, p);
+        }
+
+        applyMasterFX(ctx, sourceBus, p);
+      };
+
+      const triggerSound = useCallback(() => {
+        initAudio();
+        setLastTriggerTime(Date.now());
+        if (audioCtxRef.current) {
+            spawnSound(audioCtxRef.current, audioCtxRef.current.destination, params);
+        }
+      }, [initAudio, params]);
+
+      const toggleLock = (key) => {
+        setLockedParams(prev => ({...prev, [key]: !prev[key]}));
+      };
+
+      const randomize = () => {
+        const newParams = { ...params };
+        const r = (key, min, max) => {
+          if (!lockedParams[key]) newParams[key] = min + Math.random() * (max - min);
+        };
+        
+        r('pitch', 300, 2500); 
+        r('duration', 1.0, 5.0); 
+        r('timbre', 0, 1);
+        r('impact', 0.1, 1);
+        r('width', 0.2, 1);
+        r('space', 0.3, 0.9);
+        r('drift', 0.2, 0.9);    // Higher range for noticeable organic feel
+        r('movement', 0.1, 0.9); 
+
+        setParams(newParams);
+        setTimeout(triggerSound, 100);
+      };
+
+      const updateParam = (key, val) => {
+        setParams(prev => ({...prev, [key]: parseFloat(val)}));
+      };
+
+      const loadPreset = (name) => {
+        setParams(PRESETS[name]);
+        setActivePreset(name);
+        setTimeout(triggerSound, 50);
+      };
+
+      const handleExport = async () => {
+        setIsExporting(true);
+        try {
+          const duration = params.duration + 4.0;
+          const sampleRate = 96000; 
+          
+          const offlineCtx = new OfflineAudioContext(2, sampleRate * duration, sampleRate);
+          
+          spawnSound(offlineCtx, offlineCtx.destination, params);
+
+          const renderedBuffer = await offlineCtx.startRendering();
+          
+          const bufferToWave = (abuffer, len) => {
+            let numOfChan = abuffer.numberOfChannels, length = len * numOfChan * 2 + 44, buffer = new ArrayBuffer(length), view = new DataView(buffer), channels = [], i, sample, offset = 0, pos = 0;
+            const setUint16 = (data) => { view.setUint16(pos, data, true); pos += 2; };
+            const setUint32 = (data) => { view.setUint32(pos, data, true); pos += 4; };
+            setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157); setUint32(0x20746d66); setUint32(16); setUint16(1); setUint16(numOfChan); setUint32(abuffer.sampleRate); setUint32(abuffer.sampleRate * 2 * numOfChan); setUint16(numOfChan * 2); setUint16(16); setUint32(0x61746164); setUint32(length - pos - 4);
+            for(i = 0; i < abuffer.numberOfChannels; i++) channels.push(abuffer.getChannelData(i));
+            while(pos < len) {
+              for(i = 0; i < numOfChan; i++) {
+                sample = Math.max(-1, Math.min(1, channels[i][pos]));
+                sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767)|0;
+                view.setInt16(44 + offset, sample, true);
+                offset += 2;
+              }
+              pos++;
+            }
+            return view;
+          };
+
+          const wavBytes = bufferToWave(renderedBuffer, renderedBuffer.length);
+          const blob = new Blob([wavBytes], { type: 'audio/wav' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `prism_organic_96k_${params.engine}_${Date.now()}.wav`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        } catch (e) { console.error(e); } 
+        finally { setIsExporting(false); }
+      };
+
+      useEffect(() => {
+        const draw = () => {
+          if (!analyserRef.current || !canvasRef.current) {
+            animationRef.current = requestAnimationFrame(draw);
+            return;
+          }
+          const canvas = canvasRef.current;
+          const ctx = canvas.getContext('2d');
+          const w = canvas.width;
+          const h = canvas.height;
+          const analyser = analyserRef.current;
+          const bufferLength = analyser.frequencyBinCount;
+          const dataArray = new Uint8Array(bufferLength);
+          analyser.getByteTimeDomainData(dataArray);
+
+          ctx.fillStyle = 'rgba(2, 6, 20, 0.2)'; 
+          ctx.fillRect(0, 0, w, h);
+
+          let color = '#fff'; 
+          if (params.engine === 'PRISM') color = '#a5f3fc'; 
+          if (params.engine === 'CHIME') color = '#e2e8f0'; 
+          if (params.engine === 'HALO') color = '#f0abfc'; 
+          if (params.engine === 'GLINT') color = '#fef08a'; 
+          if (params.engine === 'LUMEN') color = '#67e8f9'; // Cyan
+          if (params.engine === 'SHARD') color = '#cbd5e1'; // Slate
+          if (params.engine === 'AURA') color = '#c4b5fd'; // Violet
+          if (params.engine === 'WHOOSH') color = '#ffffff'; // White
+          if (params.engine === 'STELLA') color = '#fcd34d'; // Amber/Gold
+          if (params.engine === 'IMPACT') color = '#f87171'; // Red 400
+          if (params.engine === 'CHARGE') color = '#facc15'; // Yellow 400
+
+          const timeSinceTrigger = Date.now() - lastTriggerTime;
+          const active = timeSinceTrigger < params.duration * 1000;
+          const intensity = Math.max(0, 1 - timeSinceTrigger / (params.duration * 800));
+
+          if (active) {
+              const glowSize = intensity * 150 + (Math.random() * 20 * params.drift); // Visual drift
+              const gradient = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, glowSize);
+              gradient.addColorStop(0, color);
+              gradient.addColorStop(1, 'rgba(0,0,0,0)');
+              ctx.fillStyle = gradient;
+              ctx.globalAlpha = 0.3;
+              ctx.fillRect(0, 0, w, h);
+              ctx.globalAlpha = 1.0;
+          }
+
+          ctx.lineWidth = 1 + params.drift * 3; // Line thickness responds to drift
+          ctx.strokeStyle = active ? color : '#334155';
+          ctx.beginPath();
+          const sliceWidth = w * 1.0 / bufferLength;
+          let x = 0;
+          for(let i = 0; i < bufferLength; i++) {
+            const v = dataArray[i] / 128.0;
+            const y = v * h / 2;
+            if(i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+            x += sliceWidth;
+          }
+          ctx.stroke();
+
+          if (active) {
+            const pCount = Math.floor(Math.random() * 5); 
+            ctx.fillStyle = '#ffffff';
+            for(let i=0; i<pCount; i++) {
+                const px = Math.random() * w;
+                const py = h/2 + (Math.random() - 0.5) * h * 0.6 * intensity;
+                const size = Math.random() * 3 * intensity;
+                ctx.fillRect(px - size, py, size*2, 1);
+                ctx.fillRect(px, py - size, 1, size*2);
+            }
+          }
+          animationRef.current = requestAnimationFrame(draw);
+        };
+        draw();
+        return () => cancelAnimationFrame(animationRef.current);
+      }, [lastTriggerTime, params]);
+
+      return (
+        <div className="min-h-screen bg-slate-950 text-cyan-50 font-sans p-4 lg:p-6 flex flex-col items-center justify-center">
+          
+          <div className="w-full max-w-6xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col lg:flex-row">
+            
+            {/* SIDEBAR */}
+            <div className="w-full lg:w-60 bg-slate-950 border-b lg:border-b-0 lg:border-r border-slate-800 p-4 flex flex-col">
+               <div className="flex items-center gap-2 mb-8">
+                  <Hexagon className="w-6 h-6 text-white animate-pulse" />
+                  <div>
+                    <h1 className="text-xl font-bold tracking-tight text-white">PRISM <span className="text-cyan-200">96k</span></h1>
+                    <p className="text-[10px] text-slate-500 font-mono tracking-widest">ORGANIC PHYSICS</p>
+                    <div className="mt-1 flex flex-col">
+                        <span className="text-[9px] text-slate-400 font-mono">By Yicheng Zhu</span>
+                        <span className="text-[8px] text-slate-600 font-mono">yichengzhu316@outlook.com</span>
+                    </div>
+                  </div>
+               </div>
+               
+               <div className="space-y-1 mb-6 flex-1 overflow-y-auto max-h-[400px]">
+                 <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 pl-2">CRYSTAL MODEL</div>
+                 <EngineBtn id="PRISM" icon={Sun} title="PRISM" desc="Drifting Crystal" active={activePreset === 'PRISM'} color="text-cyan-200" onClick={() => loadPreset('PRISM')} />
+                 <EngineBtn id="CHIME" icon={Stars} title="CHIME" desc="Wind Rods" active={activePreset === 'CHIME'} color="text-slate-200" onClick={() => loadPreset('CHIME')} />
+                 <EngineBtn id="HALO" icon={Moon} title="HALO" desc="Breathing Glass" active={activePreset === 'HALO'} color="text-fuchsia-300" onClick={() => loadPreset('HALO')} />
+                 <EngineBtn id="GLINT" icon={Sparkles} title="GLINT" desc="Scattered Light" active={activePreset === 'GLINT'} color="text-yellow-200" onClick={() => loadPreset('GLINT')} />
+                 <EngineBtn id="STELLA" icon={Bell} title="STELLA" desc="Kind Stars" active={activePreset === 'STELLA'} color="text-amber-300" onClick={() => loadPreset('STELLA')} />
+                 
+                 <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 pl-2 mt-4">ETHEREAL MODEL</div>
+                 <EngineBtn id="LUMEN" icon={Waves} title="LUMEN" desc="Liquid Light" active={activePreset === 'LUMEN'} color="text-cyan-400" onClick={() => loadPreset('LUMEN')} />
+                 <EngineBtn id="SHARD" icon={Snowflake} title="SHARD" desc="Broken Ice" active={activePreset === 'SHARD'} color="text-slate-400" onClick={() => loadPreset('SHARD')} />
+                 <EngineBtn id="AURA" icon={Radio} title="AURA" desc="Resonant Drone" active={activePreset === 'AURA'} color="text-violet-300" onClick={() => loadPreset('AURA')} />
+                 
+                 <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 pl-2 mt-4">FX MODEL</div>
+                 <EngineBtn id="WHOOSH" icon={Wind} title="WHOOSH" desc="Air Transition" active={activePreset === 'WHOOSH'} color="text-emerald-300" onClick={() => loadPreset('WHOOSH')} />
+                 <EngineBtn id="IMPACT" icon={Activity} title="IMPACT" desc="Combat Hit" active={activePreset === 'IMPACT'} color="text-red-400" onClick={() => loadPreset('IMPACT')} />
+                 <EngineBtn id="CHARGE" icon={Zap} title="CHARGE" desc="Power Up" active={activePreset === 'CHARGE'} color="text-yellow-400" onClick={() => loadPreset('CHARGE')} />
+               </div>
+
+               <div className="space-y-3 pt-4 border-t border-slate-800">
+                  <button onClick={randomize} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-all active:scale-95 group border border-slate-700">
+                      <Dice5 className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" /> RANDOMIZE
+                  </button>
+                  <button onClick={handleExport} disabled={isExporting} className="w-full py-3 border border-cyan-900/50 hover:bg-cyan-900/20 text-cyan-200 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-all active:scale-95">
+                      {isExporting ? 'RENDERING...' : <><Download className="w-4 h-4" /> EXPORT 96k WAV</>}
+                  </button>
+               </div>
+            </div>
+
+            {/* MAIN PANEL */}
+            <div className="flex-1 flex flex-col bg-slate-950 relative">
+               
+               {/* VISUALIZER */}
+               <div className="h-64 relative cursor-pointer group border-b border-slate-800/50" onClick={triggerSound}>
+                  <canvas ref={canvasRef} width={1000} height={400} className="w-full h-full object-cover opacity-80 mix-blend-screen" />
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="bg-white/5 backdrop-blur-sm p-5 rounded-full border border-white/10 group-hover:scale-110 group-hover:bg-white/10 transition-all duration-300">
+                          <Play className="w-8 h-8 text-white fill-current opacity-90" />
+                      </div>
+                  </div>
+               </div>
+
+               {/* PARAMETERS */}
+               <div className="p-8 grid grid-cols-2 md:grid-cols-4 gap-8">
+                  
+                  <div className="space-y-6">
+                     <Label icon={Activity} text="PHYSICS" />
+                     <Knob label="PITCH" param="pitch" value={params.pitch} min={200} max={3000} unit="Hz" onChange={v => updateParam('pitch', v)} locked={lockedParams.pitch} onToggleLock={() => toggleLock('pitch')} />
+                     <Knob label="DECAY" param="duration" value={params.duration} min={0.5} max={8} step={0.1} unit="s" onChange={v => updateParam('duration', v)} locked={lockedParams.duration} onToggleLock={() => toggleLock('duration')} />
+                  </div>
+
+                  <div className="space-y-6">
+                     <Label icon={Aperture} text="MATERIAL" />
+                     <Knob label="TONE" param="timbre" value={params.timbre} min={0} max={1} step={0.01} unit="%" onChange={v => updateParam('timbre', v)} locked={lockedParams.timbre} onToggleLock={() => toggleLock('timbre')} />
+                     <Knob label="IMPACT" param="impact" value={params.impact} min={0} max={1} step={0.01} unit="%" onChange={v => updateParam('impact', v)} locked={lockedParams.impact} onToggleLock={() => toggleLock('impact')} />
+                  </div>
+
+                  <div className="space-y-6">
+                     <Label icon={Waves} text="ORGANIC" />
+                     <Knob label="DRIFT" param="drift" value={params.drift} min={0} max={1} step={0.01} unit="%" desc="Instability" onChange={v => updateParam('drift', v)} locked={lockedParams.drift} onToggleLock={() => toggleLock('drift')} />
+                     <Knob label="MOVEMENT" param="movement" value={params.movement} min={0} max={1} step={0.01} unit="%" desc="LFO Speed" onChange={v => updateParam('movement', v)} locked={lockedParams.movement} onToggleLock={() => toggleLock('movement')} />
+                  </div>
+
+                  <div className="space-y-6">
+                     <Label icon={Settings2} text="ATMOSPHERE" />
+                     <Knob label="STEREO" param="width" value={params.width} min={0} max={1} step={0.01} unit="%" onChange={v => updateParam('width', v)} locked={lockedParams.width} onToggleLock={() => toggleLock('width')} />
+                     <Knob label="SHIMMER" param="space" value={params.space} min={0} max={1} step={0.01} unit="%" onChange={v => updateParam('space', v)} locked={lockedParams.space} onToggleLock={() => toggleLock('space')} />
+                  </div>
+
+               </div>
+            </div>
+          </div>
+          
+          <div className="mt-6 text-slate-700 text-[10px] font-mono tracking-widest uppercase">
+            Organic DSP Engine running at {audioCtxRef.current?.sampleRate || 48000}Hz / Export 96k
+          </div>
+        </div>
+      );
+    };
+
+    const EngineBtn = ({ id, title, desc, icon: Icon, active, color, onClick }) => (
+      <button onClick={onClick} className={`w-full text-left p-3 rounded-xl border transition-all duration-300 flex items-center gap-3 group relative overflow-hidden ${active ? 'bg-slate-900 border-slate-700 shadow-xl shadow-cyan-900/10' : 'border-transparent hover:bg-slate-900/40'}`}>
+         {active && <div className={`absolute left-0 top-0 bottom-0 w-1 bg-white shadow-[0_0_10px_rgba(255,255,255,0.5)]`}></div>}
+         <div className={`p-2 rounded-lg ${active ? 'bg-slate-950' : 'bg-slate-900/50 text-slate-600 group-hover:text-slate-400'} ${active ? color : ''}`}>
+            <Icon className="w-5 h-5" />
+         </div>
+         <div>
+            <div className={`text-xs font-bold tracking-wide ${active ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'}`}>{title}</div>
+            <div className="text-[10px] text-slate-600 font-medium">{desc}</div>
+         </div>
+      </button>
+    );
+
+    const Label = ({ icon: Icon, text }) => (
+      <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest pb-2 border-b border-slate-800/50">
+         <Icon className="w-3 h-3" /> {text}
+      </div>
+    );
+
+    const Knob = ({ label, value, min, max, step=1, onChange, unit, locked, onToggleLock, desc }) => (
+      <div className="relative group">
+         <div className="flex justify-between items-end mb-2">
+            <label className="text-[10px] font-bold text-slate-400 group-hover:text-cyan-200 transition-colors">{label}</label>
+            <div className="flex items-center gap-2">
+               <span className="text-[9px] font-mono text-slate-500">{value !== undefined ? value.toFixed(step < 1 ? 2 : 0) : 0}{unit}</span>
+               <button onClick={onToggleLock} className={`hover:bg-slate-800 rounded p-0.5 transition-colors ${locked ? 'text-cyan-200' : 'text-slate-700 hover:text-slate-400'}`}>
+                 {locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+               </button>
+            </div>
+         </div>
+         <input type="range" min={min} max={max} step={step} value={value || 0} onChange={(e) => onChange(e.target.value)}
+          className={`w-full h-1 rounded-lg appearance-none cursor-pointer transition-colors ${locked ? 'bg-slate-800 accent-cyan-200/50' : 'bg-slate-800 accent-slate-600 hover:accent-cyan-200'}`} />
+         {desc && <div className="text-[9px] text-slate-600 mt-1 opacity-0 group-hover:opacity-100 transition-opacity absolute">{desc}</div>}
+      </div>
+    );
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<CrystalSynth />);
+</script>
+</body>
+</html>
