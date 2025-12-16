@@ -26,4 +26,4 @@ Every line of DSP (Digital Signal Processing) code and UI logic in this project 
 - **Generation:** AI Model (Claude/Gemini/GPT)
 
 ---
-*Created by [你的名字]*
+*Created by Ethan Zhu 
