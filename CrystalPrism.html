@@ -79,11 +79,9 @@
         Star: (props) => <IconBase {...props}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></IconBase>,
         Mic: (props) => <IconBase {...props}><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/><line x1="8" x2="16" y1="22" y2="22"/></IconBase>,
         Square: (props) => <IconBase {...props}><rect width="18" height="18" x="3" y="3" rx="2" ry="2" fill="currentColor"/></IconBase>,
-        Speaker: (props) => <IconBase {...props}><rect width="4" height="12" x="2" y="6" rx="2"/><circle cx="17" cy="12" r="3"/><path d="M22 7v10"/></IconBase>,
-        Volume2: (props) => <IconBase {...props}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></IconBase>
     };
 
-    const { Play, Pause, Dice5, Lock, Unlock, Sparkles, Sun, Hexagon, Aperture, Activity, Settings2, Moon, Stars, Wind, Zap, Waves, Snowflake, Radio, Bell, Droplets, CircleDot, Layers, Beaker, Music, Smile, Star, Mic, Square, Volume2 } = Icons;
+    const { Play, Pause, Dice5, Lock, Unlock, Sparkles, Sun, Hexagon, Aperture, Activity, Settings2, Moon, Stars, Wind, Zap, Waves, Snowflake, Radio, Bell, Droplets, CircleDot, Layers, Beaker, Music, Smile, Star, Mic, Square } = Icons;
 
     // --- MUSIC THEORY ENGINE ---
     const SCALES = {
@@ -840,27 +838,24 @@
                   </div>
                </div>
                
-               {/* --- CREDITS SECTION ADDED HERE --- */}
-               <div className="mb-6 px-1">
-                   <div className="text-[10px] text-slate-600 font-medium">Dev: Ethan Zhu</div>
-                   <div className="text-[10px] text-slate-700 font-mono scale-90 origin-left"><a href="mailto:yichengzhu@outlook.com" className="hover:text-cyan-400 transition-colors">yichengzhu@outlook.com</a></div>
-                   <div className="text-[10px] text-slate-600 font-medium mt-1">
-                       Thanks to <a href="https://linktr.ee/amonova" target="_blank" className="text-pink-400 hover:text-pink-300 transition-colors underline decoration-pink-500/30">Amo Nova</a>
+               {/* --- CREDITS SECTION --- */}
+               <div className="mb-6 px-1 border-b border-slate-800/50 pb-4">
+                   <div className="text-xs font-bold text-slate-400 mb-1">DEVELOPER</div>
+                   <a href="https://linktr.ee/yichengzhu316" target="_blank" className="block text-sm font-bold text-white hover:text-cyan-300 transition-colors mb-1">
+                       Ethan Zhu
+                   </a>
+                   <div className="text-[10px] text-slate-600 font-mono mb-3">yichengzhu@outlook.com</div>
+                   
+                   <div className="text-[10px] text-slate-600">
+                       Special thanks to <a href="https://linktr.ee/amonova" target="_blank" className="text-slate-500 hover:text-pink-300 transition-colors underline decoration-slate-700">Amo Nova</a>
                    </div>
                </div>
 
                <div className="space-y-1 mb-6 flex-1 overflow-y-auto max-h-[500px] pr-2">
-                 <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 pl-2">KAWAII / UI</div>
-                 <EngineBtn id="POP" icon={Smile} title="POP" desc="Cute Bubbles" active={activePreset === 'POP'} color="text-pink-300" onClick={() => loadPreset('POP')} />
-                 <EngineBtn id="KIRA" icon={Star} title="KIRA" desc="Magic Sparkle" active={activePreset === 'KIRA'} color="text-purple-200" onClick={() => loadPreset('KIRA')} />
-
-                 <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 pl-2 mt-4">NEW LIQUID</div>
-                 <EngineBtn id="JELLY" icon={Beaker} title="JELLY" desc="Wobbly LPG" active={activePreset === 'JELLY'} color="text-pink-400" onClick={() => loadPreset('JELLY')} />
-                 <EngineBtn id="MERCURY" icon={Layers} title="MERCURY" desc="Metallic FM" active={activePreset === 'MERCURY'} color="text-slate-300" onClick={() => loadPreset('MERCURY')} />
-                 <EngineBtn id="RUBBER" icon={CircleDot} title="RUBBER" desc="Elastic Sub" active={activePreset === 'RUBBER'} color="text-orange-400" onClick={() => loadPreset('RUBBER')} />
-                 <EngineBtn id="FLUX" icon={Droplets} title="FLUX" desc="Water Flow" active={activePreset === 'FLUX'} color="text-sky-400" onClick={() => loadPreset('FLUX')} />
                  
-                 <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 pl-2 mt-4">CLASSIC CRYSTAL</div>
+                 {/* REORDERED SECTIONS */}
+                 
+                 <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 pl-2">CLASSIC CRYSTAL</div>
                  <EngineBtn id="PRISM" icon={Sun} title="PRISM" desc="Drifting Crystal" active={activePreset === 'PRISM'} color="text-cyan-200" onClick={() => loadPreset('PRISM')} />
                  <EngineBtn id="CHIME" icon={Stars} title="CHIME" desc="Wind Rods" active={activePreset === 'CHIME'} color="text-slate-200" onClick={() => loadPreset('CHIME')} />
                  <EngineBtn id="HALO" icon={Moon} title="HALO" desc="Breathing Glass" active={activePreset === 'HALO'} color="text-fuchsia-300" onClick={() => loadPreset('HALO')} />
@@ -871,6 +866,16 @@
                  <EngineBtn id="LUMEN" icon={Waves} title="LUMEN" desc="Liquid Light" active={activePreset === 'LUMEN'} color="text-cyan-400" onClick={() => loadPreset('LUMEN')} />
                  <EngineBtn id="SHARD" icon={Snowflake} title="SHARD" desc="Broken Ice" active={activePreset === 'SHARD'} color="text-slate-400" onClick={() => loadPreset('SHARD')} />
                  <EngineBtn id="AURA" icon={Radio} title="AURA" desc="Resonant Drone" active={activePreset === 'AURA'} color="text-violet-300" onClick={() => loadPreset('AURA')} />
+
+                 <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 pl-2 mt-4">NEW LIQUID</div>
+                 <EngineBtn id="JELLY" icon={Beaker} title="JELLY" desc="Wobbly LPG" active={activePreset === 'JELLY'} color="text-pink-400" onClick={() => loadPreset('JELLY')} />
+                 <EngineBtn id="MERCURY" icon={Layers} title="MERCURY" desc="Metallic FM" active={activePreset === 'MERCURY'} color="text-slate-300" onClick={() => loadPreset('MERCURY')} />
+                 <EngineBtn id="RUBBER" icon={CircleDot} title="RUBBER" desc="Elastic Sub" active={activePreset === 'RUBBER'} color="text-orange-400" onClick={() => loadPreset('RUBBER')} />
+                 <EngineBtn id="FLUX" icon={Droplets} title="FLUX" desc="Water Flow" active={activePreset === 'FLUX'} color="text-sky-400" onClick={() => loadPreset('FLUX')} />
+                 
+                 <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 pl-2 mt-4">KAWAII / UI</div>
+                 <EngineBtn id="POP" icon={Smile} title="POP" desc="Cute Bubbles" active={activePreset === 'POP'} color="text-pink-300" onClick={() => loadPreset('POP')} />
+                 <EngineBtn id="KIRA" icon={Star} title="KIRA" desc="Magic Sparkle" active={activePreset === 'KIRA'} color="text-purple-200" onClick={() => loadPreset('KIRA')} />
                  
                  <div className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 pl-2 mt-4">CLASSIC FX</div>
                  <EngineBtn id="WHOOSH" icon={Wind} title="WHOOSH" desc="Air Transition" active={activePreset === 'WHOOSH'} color="text-emerald-300" onClick={() => loadPreset('WHOOSH')} />
