@@ -111,8 +111,6 @@
             const [analyser, setAnalyser] = useState(null);
             const canvasRef = useRef(null);
             const [volume, setVolume] = useState(0.6);
-            const [isPlaying, setIsPlaying] = useState(false); // Arp State
-            const sequencerRef = useRef(null); // Arp Timer
             const animationRef = useRef(null);
 
             // Params
@@ -136,14 +134,8 @@
                 modSpeed: 0,
 
                 // FX (Default Off)
-                reverb: 0.0,
                 delay: 0.0,
                 wobble: 0.0,
-
-                // Arp
-                bpm: 120,
-                arpMode: 'OFF',
-                arpSpeed: 4,
             });
 
             const [lockedParams, setLockedParams] = useState({});
@@ -154,57 +146,57 @@
             const PRESETS = {
                 // --- PHYSICS ---
                 BUBBLE: {
-                    params: { frequency: 450, shape: 'sine', sweep: -0.6, filterFreq: 800, filterQ: 15, filterEnv: 600, decay: 0.15, modDepth: 0, arpMode: 'OFF' },
+                    params: { frequency: 450, shape: 'sine', sweep: -0.6, filterFreq: 800, filterQ: 15, filterEnv: 600, decay: 0.15, modDepth: 0 },
                     locks: ['shape', 'filterQ', 'sweep', 'modDepth']
                 },
                 JUMP: {
-                    params: { frequency: 220, shape: 'square', sweep: 0.8, filterFreq: 1500, filterQ: 2, filterEnv: 500, decay: 0.3, modDepth: 0, arpMode: 'OFF' },
+                    params: { frequency: 220, shape: 'square', sweep: 0.8, filterFreq: 1500, filterQ: 2, filterEnv: 500, decay: 0.3, modDepth: 0 },
                     locks: ['shape', 'sweep']
                 },
                 BOING: {
-                    params: { frequency: 150, shape: 'sine', sweep: 0.0, filterFreq: 600, filterQ: 5, filterEnv: 0, decay: 0.6, modDepth: 200, modSpeed: 15, arpMode: 'OFF' },
+                    params: { frequency: 150, shape: 'sine', sweep: 0.0, filterFreq: 600, filterQ: 5, filterEnv: 0, decay: 0.6, modDepth: 200, modSpeed: 15 },
                     locks: ['modSpeed', 'modDepth', 'decay']
                 },
 
                 // --- EMOTES ---
                 QUESTION: {
-                    params: { frequency: 400, shape: 'sine', sweep: 0.5, filterFreq: 2000, filterQ: 1, filterEnv: 0, decay: 0.25, modDepth: 0, arpMode: 'OFF' },
+                    params: { frequency: 400, shape: 'sine', sweep: 0.5, filterFreq: 2000, filterQ: 1, filterEnv: 0, decay: 0.25, modDepth: 0 },
                     locks: ['sweep', 'shape']
                 },
                 SAD: {
-                    params: { frequency: 500, shape: 'triangle', sweep: -0.15, filterFreq: 800, filterQ: 1, filterEnv: -200, decay: 0.6, modDepth: 0, wobble: 0.15, reverb: 0.3, arpMode: 'OFF' },
+                    params: { frequency: 500, shape: 'triangle', sweep: -0.15, filterFreq: 800, filterQ: 1, filterEnv: -200, decay: 0.6, modDepth: 0, wobble: 0.15 },
                     locks: ['shape', 'sweep', 'wobble', 'decay']
                 },
                 ANXIETY: {
-                    params: { frequency: 200, shape: 'sawtooth', sweep: 0, filterFreq: 3000, filterQ: 1, filterEnv: 0, decay: 0.1, modDepth: 500, modSpeed: 40, arpMode: 'RANDOM', arpSpeed: 16, bpm: 180 },
-                    locks: ['modSpeed', 'arpMode', 'arpSpeed', 'shape']
+                    params: { frequency: 200, shape: 'sawtooth', sweep: 0, filterFreq: 3000, filterQ: 1, filterEnv: 0, decay: 0.1, modDepth: 500, modSpeed: 40 },
+                    locks: ['modSpeed', 'shape']
                 },
                 ANGRY: {
-                    params: { frequency: 100, shape: 'sawtooth', sweep: -0.1, filterFreq: 500, filterQ: 10, filterEnv: 2000, decay: 0.2, modDepth: 800, modSpeed: 80, arpMode: 'OFF' },
+                    params: { frequency: 100, shape: 'sawtooth', sweep: -0.1, filterFreq: 500, filterQ: 10, filterEnv: 2000, decay: 0.2, modDepth: 800, modSpeed: 80 },
                     locks: ['shape', 'filterEnv', 'modDepth']
                 },
                 HAPPY: {
-                    params: { frequency: 880, shape: 'triangle', sweep: 0.1, filterFreq: 4000, filterQ: 1, filterEnv: 0, decay: 0.1, modDepth: 0, arpMode: 'UP', arpSpeed: 8, bpm: 160 },
-                    locks: ['arpMode', 'shape']
+                    params: { frequency: 880, shape: 'triangle', sweep: 0.1, filterFreq: 4000, filterQ: 1, filterEnv: 0, decay: 0.1, modDepth: 0 },
+                    locks: ['shape']
                 },
 
                 // --- MAGIC ---
                 SPARKLE: {
-                    params: { frequency: 1200, shape: 'sine', sweep: 0, filterFreq: 5000, filterQ: 1, filterEnv: 0, decay: 0.5, modDepth: 1000, modSpeed: 80, delay: 0.3, wobble: 0.2, arpMode: 'RANDOM', arpSpeed: 16 },
-                    locks: ['modSpeed', 'arpMode']
+                    params: { frequency: 1200, shape: 'sine', sweep: 0, filterFreq: 5000, filterQ: 1, filterEnv: 0, decay: 0.5, modDepth: 1000, modSpeed: 80, delay: 0.3, wobble: 0.2 },
+                    locks: ['modSpeed']
                 },
                 TRANSFORM: {
-                    params: { frequency: 300, shape: 'sine', sweep: 1.0, filterFreq: 2000, filterQ: 8, filterEnv: 2000, decay: 1.5, modDepth: 200, modSpeed: 20, reverb: 0.4, delay: 0.2, arpMode: 'OFF' },
+                    params: { frequency: 300, shape: 'sine', sweep: 1.0, filterFreq: 2000, filterQ: 8, filterEnv: 2000, decay: 1.5, modDepth: 200, modSpeed: 20, delay: 0.2 },
                     locks: ['sweep', 'decay']
                 },
 
                 // --- UI ---
                 CLICK: {
-                    params: { frequency: 1500, shape: 'sine', sweep: -0.9, filterFreq: 5000, filterQ: 1, filterEnv: 0, decay: 0.05, modDepth: 0, arpMode: 'OFF' },
+                    params: { frequency: 1500, shape: 'sine', sweep: -0.9, filterFreq: 5000, filterQ: 1, filterEnv: 0, decay: 0.05, modDepth: 0 },
                     locks: ['decay', 'sweep']
                 },
                 ERROR: {
-                    params: { frequency: 100, shape: 'sawtooth', sweep: 0, filterFreq: 500, filterQ: 1, filterEnv: 0, decay: 0.2, modDepth: 500, modSpeed: 30, arpMode: 'OFF' },
+                    params: { frequency: 100, shape: 'sawtooth', sweep: 0, filterFreq: 500, filterQ: 1, filterEnv: 0, decay: 0.2, modDepth: 500, modSpeed: 30 },
                     locks: ['shape', 'modSpeed']
                 },
             };
@@ -227,20 +219,7 @@
                         masterGain.gain.value = volume;
                         analys.fftSize = 2048;
 
-                        // Effects
-                        const reverbNode = ctx.createConvolver();
-                        const sampleRate = ctx.sampleRate;
-                        const length = sampleRate * 1.5;
-                        const impulse = ctx.createBuffer(2, length, sampleRate);
-                        for (let i = 0; i < length; i++) {
-                            const n = i / length;
-                            const env = Math.pow(1 - n, 2);
-                            impulse.getChannelData(0)[i] = (Math.random() * 2 - 1) * env;
-                            impulse.getChannelData(1)[i] = (Math.random() * 2 - 1) * env;
-                        }
-                        reverbNode.buffer = impulse;
-                        const reverbGain = ctx.createGain();
-
+                        // Effects Bus
                         const delayNode = ctx.createDelay();
                         delayNode.delayTime.value = 0.20;
                         const delayFeedback = ctx.createGain();
@@ -263,8 +242,6 @@
                         delayFilter.connect(delayNode);
                         delayNode.connect(delayGain);
 
-                        reverbNode.connect(reverbGain);
-                        reverbGain.connect(compressor);
                         delayGain.connect(compressor);
                         masterGain.connect(compressor);
                         compressor.connect(analys);
@@ -273,7 +250,6 @@
                         setAudioCtx(ctx);
                         setMasterBus({
                             master: masterGain,
-                            reverbGain: reverbGain,
                             delay: delayNode,
                             delayGain: delayGain,
                             wobbleGain: wobbleGain,
@@ -290,10 +266,9 @@
                 if (!audioCtx || !masterBus) return;
                 const t = audioCtx.currentTime;
                 masterBus.master.gain.setTargetAtTime(volume, t, 0.05);
-                masterBus.reverbGain.gain.setTargetAtTime(params.reverb, t, 0.05);
                 masterBus.delayGain.gain.setTargetAtTime(params.delay, t, 0.05);
                 masterBus.wobbleGain.gain.setTargetAtTime(params.wobble * 0.005, t, 0.05);
-            }, [volume, params.reverb, params.delay, params.wobble, masterBus, audioCtx]);
+            }, [volume, params.delay, params.wobble, masterBus, audioCtx]);
 
             const triggerSound = useCallback((overrideFreq = null, overrideParams = null) => {
                 if (!audioCtx || !masterBus) return;
@@ -346,7 +321,6 @@
                 filter.connect(gainNode);
 
                 gainNode.connect(masterBus.master);
-                gainNode.connect(masterBus.reverbGain);
                 gainNode.connect(masterBus.delay);
 
                 osc.start(t);
@@ -354,46 +328,6 @@
                 setLastTriggerTime(Date.now());
 
             }, [audioCtx, masterBus, params]);
-
-            // --- Arp ---
-            const arpCounter = useRef(0);
-            useEffect(() => {
-                if (isPlaying) {
-                    const interval = (60 / params.bpm) * 1000 / (params.arpSpeed / 4);
-                    const playStep = () => {
-                        const i = arpCounter.current;
-                        let noteFreq = params.frequency;
-
-                        if (params.arpMode === 'UP') {
-                            const intervals = [1, 1.25, 1.5, 2];
-                            noteFreq = params.frequency * intervals[i % 4];
-                        } else if (params.arpMode === 'OCTAVE') {
-                            const intervals = [1, 2, 4, 2];
-                            noteFreq = params.frequency * intervals[i % 4];
-                        } else if (params.arpMode === 'RANDOM') {
-                            const jumps = [0.5, 1, 1.25, 1.5, 2];
-                            noteFreq = params.frequency * jumps[Math.floor(Math.random() * jumps.length)];
-                        }
-                        triggerSound(noteFreq, null);
-                        arpCounter.current++;
-                    };
-                    playStep();
-                    sequencerRef.current = setInterval(playStep, interval);
-                } else {
-                    if (sequencerRef.current) clearInterval(sequencerRef.current);
-                    arpCounter.current = 0;
-                }
-                return () => clearInterval(sequencerRef.current);
-            }, [isPlaying, params.bpm, params.arpMode, params.arpSpeed, params.frequency, triggerSound]);
-
-            const togglePlay = () => {
-                if (!audioCtx) return;
-                if (params.arpMode === 'OFF') {
-                    triggerSound();
-                } else {
-                    setIsPlaying(!isPlaying);
-                }
-            };
 
             // --- Visualizer ---
             useEffect(() => {
@@ -468,11 +402,10 @@
                 update('modSpeed', r(10, 100));
 
                 update('delay', Math.random() > 0.8 ? r(0, 0.3) : 0);
-                update('reverb', Math.random() > 0.8 ? r(0, 0.3) : 0);
                 update('wobble', r(0, 0.2));
 
                 setParams(next);
-                if (!isPlaying) triggerSound(null, next);
+                triggerSound(null, next);
             };
 
             const loadPreset = (name) => {
@@ -491,15 +424,13 @@
                     });
                 }
 
-                if (preset.params.reverb === undefined) newParams.reverb = 0;
                 if (preset.params.delay === undefined) newParams.delay = 0;
                 if (preset.params.modDepth === undefined) newParams.modDepth = 0;
-                if (preset.params.arpMode === undefined) newParams.arpMode = 'OFF';
 
                 setLockedParams(newLocks);
                 setParams(newParams);
 
-                if (!isPlaying) triggerSound(null, newParams);
+                triggerSound(null, newParams);
             };
 
             return (
@@ -525,7 +456,6 @@
                                     Ethan Zhu
                                 </a>
                                 <div className="text-[10px] text-slate-600 font-mono mb-3">yichengzhu@outlook.com</div>
-
                             </div>
 
                             <div className="flex-1 overflow-y-auto space-y-6 pr-2">
@@ -572,23 +502,9 @@
                         <div className="flex-1 flex flex-col bg-slate-900 relative overflow-hidden">
 
                             {/* HEADER */}
-                            <div className="h-20 bg-slate-950/50 border-b border-slate-800 flex items-center px-8 justify-between shrink-0 backdrop-blur-sm">
+                            <div className="h-20 bg-slate-950/50 border-b border-slate-800 flex items-center justify-between px-8 shrink-0 backdrop-blur-sm">
+                                {/* Left Side Empty (Was Play/Seq) */}
                                 <div className="flex items-center gap-6">
-                                    <button
-                                        onClick={togglePlay}
-                                        className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 ${isPlaying || params.arpMode === 'OFF' ? 'bg-pink-500 text-white hover:bg-pink-400 shadow-pink-500/20' : 'bg-slate-800 text-slate-400'}`}
-                                    >
-                                        {params.arpMode === 'OFF' ? <Icons.Music className="w-5 h-5" /> : (isPlaying ? <Icons.Pause className="w-5 h-5" /> : <Icons.Play className="w-5 h-5 ml-1" />)}
-                                    </button>
-
-                                    {params.arpMode !== 'OFF' && (
-                                        <div className="flex flex-col">
-                                            <span className="text-[10px] font-bold text-slate-500 tracking-wider">SEQUENCER</span>
-                                            <span className={`text-sm font-bold font-mono ${isPlaying ? 'text-pink-400 animate-pulse' : 'text-slate-400'}`}>
-                                                {isPlaying ? 'RUNNING' : 'STOPPED'}
-                                            </span>
-                                        </div>
-                                    )}
                                 </div>
 
                                 <div className="flex items-center gap-8">
@@ -599,17 +515,6 @@
                                             <span className="text-white">{(volume * 100).toFixed(0)}%</span>
                                         </div>
                                         <input type="range" min="0" max="1" step={0.01} value={volume} onChange={e => setVolume(parseFloat(e.target.value))} className="w-full h-1 bg-slate-800 accent-pink-500 rounded-full cursor-pointer" />
-                                    </div>
-
-                                    <div className="w-px h-8 bg-slate-800"></div>
-
-                                    {/* BPM */}
-                                    <div className="flex flex-col w-24 group">
-                                        <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1 group-hover:text-slate-300 transition-colors">
-                                            <span>SPEED</span>
-                                            <span className="text-pink-300">{(params.bpm || 120).toFixed(0)}</span>
-                                        </div>
-                                        <input type="range" min={60} max={400} value={params.bpm} onChange={e => setParams({ ...params, bpm: Number(e.target.value) })} className="w-full h-1 bg-slate-800 accent-slate-400 rounded-lg cursor-pointer" />
                                     </div>
                                 </div>
                             </div>
@@ -673,31 +578,13 @@
                                         <SectionTitle icon={Icons.Zap} title="FM Texture" />
                                         <Knob label="FM Speed" param="modSpeed" value={params.modSpeed} min={0} max={200} unit="Hz" color="accent-purple-400" onChange={v => setParams({ ...params, modSpeed: +v })} locked={lockedParams.modSpeed} onToggleLock={() => toggleLock('modSpeed')} />
                                         <Knob label="FM Depth" param="modDepth" value={params.modDepth} min={0} max={2000} unit="" color="accent-purple-400" onChange={v => setParams({ ...params, modDepth: +v })} locked={lockedParams.modDepth} onToggleLock={() => toggleLock('modDepth')} />
-
-                                        <div className="pt-4 border-t border-slate-800/50">
-                                            <div className="flex justify-between items-center mb-2">
-                                                <span className="text-[10px] font-bold text-slate-500">ARP MODE</span>
-                                                <LockBtn locked={lockedParams.arpMode} onClick={() => toggleLock('arpMode')} />
-                                            </div>
-                                            <div className="grid grid-cols-4 gap-1 mb-3">
-                                                {['OFF', 'UP', 'RANDOM', 'OCTAVE'].map(m => (
-                                                    <button key={m} onClick={() => setParams({ ...params, arpMode: m })}
-                                                        disabled={lockedParams.arpMode}
-                                                        className={`text-[9px] font-bold py-1.5 rounded transition-colors ${params.arpMode === m ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30' : 'bg-slate-950 text-slate-500 hover:text-slate-300'} ${lockedParams.arpMode ? 'opacity-50' : ''}`}>
-                                                        {m.slice(0, 3)}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                            <Knob label="Arp Speed" param="arpSpeed" value={params.arpSpeed} min={1} max={16} step={1} unit="" color="accent-slate-400" onChange={v => setParams({ ...params, arpSpeed: +v })} locked={lockedParams.arpSpeed} onToggleLock={() => toggleLock('arpSpeed')} />
-                                        </div>
                                     </div>
 
-                                    {/* 4. FX BUS (Default Dry) */}
+                                    {/* 4. FX BUS */}
                                     <div className="space-y-5">
                                         <SectionTitle icon={Icons.Sliders} title="FX Bus" />
                                         <Knob label="Tape Delay" param="delay" value={params.delay} min={0} max={1} step={0.05} unit="%" color="accent-indigo-400" onChange={v => setParams({ ...params, delay: +v })} locked={lockedParams.delay} onToggleLock={() => toggleLock('delay')} />
                                         <Knob label="Delay Wobble" param="wobble" value={params.wobble} min={0} max={0.5} step={0.01} unit="%" color="accent-indigo-400" onChange={v => setParams({ ...params, wobble: +v })} locked={lockedParams.wobble} onToggleLock={() => toggleLock('wobble')} />
-                                        <Knob label="Reverb" param="reverb" value={params.reverb} min={0} max={1} step={0.05} unit="%" color="accent-slate-400" onChange={v => setParams({ ...params, reverb: +v })} locked={lockedParams.reverb} onToggleLock={() => toggleLock('reverb')} />
                                     </div>
 
                                 </div>
