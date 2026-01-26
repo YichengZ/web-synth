@@ -18,7 +18,22 @@ Every line of DSP (Digital Signal Processing) code and UI logic in this project 
   - Real-time Canvas Visualizer
   - WAV Export (Offline Rendering)
 
-*(More modules coming soon...)*
+### 2. TITAN SUB (Cinematic Deep Bass)
+- **Engine:** Custom Quad-Source Web Audio DSP
+- **Concept:** Deep sub-bass engine optimized for low-frequency playback.
+- **Features:**
+  - Multi-layer Morphing (Drop, Impact, Rumble)
+  - Stereo Quadrature Shapers & Phase-safe Width
+  - Analog-style Saturation & Inflator
+  - Real-time Phase Metering
+
+### 3. KAWAII SYNTH (Anime SFX Engine)
+- **Engine:** Web Audio API + React
+- **Concept:** A cute and colorful synthesizer playground for anime-style sound effects.
+- **Features:**
+  - **Presets:** Physics (Bubble, Boing), Emotes (Happy, Angry), and Magic textures.
+  - **Controls:** Interactive Oscilloscope, Arpeggiator, and Randomizer.
+  - **FX:** Tape Delay, Wobble, and Sparkle Reverb. 
 
 ## 🛠️ Tech Stack
 - **Core:** Vanilla JavaScript + Web Audio API
