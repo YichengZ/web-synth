@@ -1,23 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Synth Lab | Yicheng Zhu</title>
     <style>
-        body { 
-            background: #020617; 
-            color: #fff; 
-            font-family: 'Courier New', Courier, monospace; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            min-height: 100vh; 
-            margin: 0; 
-            padding: 2rem; 
+        body {
+            background: #020617;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 2rem;
             box-sizing: border-box;
         }
-        
+
         /* Header */
         header {
             text-align: center;
@@ -27,76 +28,84 @@
             border-bottom: 1px solid #1e293b;
             padding-bottom: 2rem;
         }
-        h1 { 
-            color: #22d3ee; 
-            text-transform: uppercase; 
-            letter-spacing: 4px; 
+
+        h1 {
+            color: #22d3ee;
+            text-transform: uppercase;
+            letter-spacing: 4px;
             margin: 0 0 0.5rem 0;
             text-shadow: 0 0 20px rgba(34, 211, 238, 0.2);
         }
+
         .subtitle {
             color: #94a3b8;
             font-size: 0.9rem;
         }
 
         /* Grid Layout */
-        .grid { 
-            display: grid; 
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); 
-            gap: 1.5rem; 
-            width: 100%; 
-            max-width: 900px; 
-            flex: 1; /* 让中间内容撑开，保证footer在底部 */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1.5rem;
+            width: 100%;
+            max-width: 900px;
+            flex: 1;
+            /* 让中间内容撑开，保证footer在底部 */
         }
 
         /* Card Style */
-        .card { 
-            background: #0f172a; 
-            border: 1px solid #334155; 
-            padding: 1.5rem; 
-            border-radius: 12px; 
-            transition: all 0.3s ease; 
-            text-decoration: none; 
-            color: inherit; 
+        .card {
+            background: #0f172a;
+            border: 1px solid #334155;
+            padding: 1.5rem;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            color: inherit;
             display: flex;
             flex-direction: column;
             position: relative;
             overflow: hidden;
         }
-        .card:hover { 
-            transform: translateY(-5px); 
-            border-color: #22d3ee; 
+
+        .card:hover {
+            transform: translateY(-5px);
+            border-color: #22d3ee;
             background: #1e293b;
-            box-shadow: 0 10px 30px -10px rgba(34, 211, 238, 0.15); 
+            box-shadow: 0 10px 30px -10px rgba(34, 211, 238, 0.15);
         }
-        .card h2 { 
-            margin: 0 0 0.5rem 0; 
-            font-size: 1.1rem; 
-            color: #f1f5f9; 
+
+        .card h2 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.1rem;
+            color: #f1f5f9;
             display: flex;
             align-items: center;
             gap: 8px;
         }
-        .card p { 
-            margin: 0; 
-            color: #64748b; 
-            font-size: 0.85rem; 
+
+        .card p {
+            margin: 0;
+            color: #64748b;
+            font-size: 0.85rem;
             line-height: 1.4;
             flex: 1;
         }
+
         .tags {
             margin-top: 1rem;
             display: flex;
             gap: 0.5rem;
             flex-wrap: wrap;
         }
-        .tag { 
-            background: #020617; 
-            padding: 3px 8px; 
-            border-radius: 4px; 
-            font-size: 0.7rem; 
-            color: #22d3ee; 
-            border: 1px solid #1e293b; 
+
+        .tag {
+            background: #020617;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            color: #22d3ee;
+            border: 1px solid #1e293b;
         }
 
         /* Footer Style */
@@ -108,6 +117,7 @@
             max-width: 800px;
             text-align: center;
         }
+
         .profile-name {
             display: block;
             color: #e2e8f0;
@@ -115,18 +125,21 @@
             font-size: 1rem;
             margin-bottom: 0.2rem;
         }
+
         .profile-role {
             display: block;
             color: #64748b;
             font-size: 0.8rem;
             margin-bottom: 1rem;
         }
+
         .social-links {
             display: flex;
             justify-content: center;
             gap: 1.5rem;
             flex-wrap: wrap;
         }
+
         .social-links a {
             color: #94a3b8;
             text-decoration: none;
@@ -136,11 +149,13 @@
             align-items: center;
             gap: 6px;
         }
+
         .social-links a:hover {
             color: #22d3ee;
         }
     </style>
 </head>
+
 <body>
 
     <header>
@@ -149,12 +164,13 @@
     </header>
 
     <div class="grid">
-        
+
         <a href="CrystalPrism.html" class="card">
             <h2>
                 <span style="color:#22d3ee">◆</span> PRISM 96k
             </h2>
-            <p>An organic physics synthesizer simulating light refraction. Features 10+ engines including glass, liquid, and chime textures.</p>
+            <p>An organic physics synthesizer simulating light refraction. Features 10+ engines including glass, liquid,
+                and chime textures.</p>
             <div class="tags">
                 <span class="tag">Web Audio</span>
                 <span class="tag">Physics DSP</span>
@@ -166,11 +182,23 @@
             <h2>
                 <span style="color:#f97316">◆</span> TITAN SUB
             </h2>
-            <p>A deep sub-bass engine optimized for low-frequency playback and subwoofer rigs. Multi-layer morphing, stereo shapers, and analog-style saturation for powerful low-end textures.</p>
+            <p>A deep sub-bass engine optimized for low-frequency playback and subwoofer rigs. Multi-layer morphing,
+                stereo shapers, and analog-style saturation for powerful low-end textures.</p>
             <div class="tags">
                 <span class="tag">Web Audio</span>
                 <span class="tag">Sub Bass</span>
                 <span class="tag">Multi-layer</span>
+            </div>
+        </a>
+
+        <a href="KawaiiSynth.html" class="card">
+            <h2>
+                <span style="color:#ec4899">◆</span> KAWAII SYNTH
+            </h2>
+            <p>A cute and colorful synthesizer. (Work in Progress)</p>
+            <div class="tags">
+                <span class="tag">Web Audio</span>
+                <span class="tag">Cute</span>
             </div>
         </a>
 
@@ -179,16 +207,16 @@
     <footer>
         <span class="profile-name">Yicheng (Ethan) Zhu</span>
         <span class="profile-role">Sound Designer / Developer</span>
-        
+
         <div class="social-links">
             <a href="mailto:yichengzhu316@outlook.com">
                 ✉️ yichengzhu316@outlook.com
             </a>
-            
+
             <a href="https://www.linkedin.com/in/yicheng-ethan-zhu-2b795422b/" target="_blank">
                 🔗 LinkedIn
             </a>
-            
+
             <a href="https://github.com/" target="_blank">
                 🐙 GitHub
             </a>
@@ -196,4 +224,5 @@
     </footer>
 
 </body>
+
 </html>
