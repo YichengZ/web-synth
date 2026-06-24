@@ -73,11 +73,14 @@
 
   const createWavRecorder = (audioContext, sourceNode) => {
     const processor = audioContext.createScriptProcessor(BUFFER_SIZE, CHANNELS, CHANNELS);
+    const silentMonitor = audioContext.createGain();
     const chunks = [];
     let isRecording = false;
 
+    silentMonitor.gain.value = 0;
     sourceNode.connect(processor);
-    processor.connect(audioContext.destination);
+    processor.connect(silentMonitor);
+    silentMonitor.connect(audioContext.destination);
 
     processor.onaudioprocess = (event) => {
       if (!isRecording) return;

@@ -832,17 +832,12 @@
             
             {/* SIDEBAR */}
             <div className="w-full lg:w-64 bg-slate-950 border-b lg:border-b-0 lg:border-r border-slate-800 p-4 flex flex-col">
-               <div className="flex items-center justify-between gap-3 mb-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Hexagon className="w-6 h-6 text-white animate-pulse shrink-0" />
-                    <div>
-                      <h1 className="text-xl font-bold tracking-tight text-white">PRISM <span className="text-pink-300">PRO</span></h1>
-                      <p className="text-[10px] text-slate-500 font-mono tracking-widest">96KHz 24-BIT STUDIO</p>
-                    </div>
+               <div className="flex items-center gap-2 mb-2">
+                  <Hexagon className="w-6 h-6 text-white animate-pulse" />
+                  <div>
+                    <h1 className="text-xl font-bold tracking-tight text-white">PRISM <span className="text-pink-300">PRO</span></h1>
+                    <p className="text-[10px] text-slate-500 font-mono tracking-widest">96KHz 24-BIT STUDIO</p>
                   </div>
-                  <a href="index.html" aria-label="Back to AI Synth Lab" className="h-9 px-3 rounded-lg border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-900 flex items-center gap-2 text-[10px] font-bold tracking-widest transition-colors shrink-0">
-                    <Home className="w-3.5 h-3.5" /> LAB
-                  </a>
                </div>
                
                {/* --- CREDITS SECTION --- */}
@@ -856,6 +851,9 @@
                    <div className="text-[10px] text-slate-600">
                        Special thanks to <a href="https://linktr.ee/amonova" target="_blank" className="text-slate-500 hover:text-pink-300 transition-colors underline decoration-slate-700">Amo Nova</a>
                    </div>
+                   <a href="index.html" aria-label="Back to AI Synth Lab" className="mt-4 h-9 px-3 rounded-lg border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-900 flex items-center justify-center gap-2 text-[10px] font-bold tracking-widest transition-colors">
+                       <Home className="w-3.5 h-3.5" /> LAB
+                   </a>
                </div>
 
                <div className="space-y-1 mb-6 flex-1 overflow-y-auto max-h-[500px] pr-2">
