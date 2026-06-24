@@ -54,6 +54,7 @@
     const Icons = {
         Play: (props) => <IconBase {...props}><polygon points="5 3 19 12 5 21 5 3"/></IconBase>,
         Pause: (props) => <IconBase {...props}><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></IconBase>,
+        Home: (props) => <IconBase {...props}><path d="m3 9 9-7 9 7"/><path d="M9 22V12h6v10"/><path d="M21 9v13H3V9"/></IconBase>,
         Dice5: (props) => <IconBase {...props}><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="M16 8h.01"/><path d="M8 8h.01"/><path d="M8 16h.01"/><path d="M16 16h.01"/><path d="M12 12h.01"/></IconBase>,
         Lock: (props) => <IconBase {...props}><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></IconBase>,
         Unlock: (props) => <IconBase {...props}><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></IconBase>,
@@ -82,7 +83,7 @@
         Square: (props) => <IconBase {...props}><rect width="18" height="18" x="3" y="3" rx="2" ry="2" fill="currentColor"/></IconBase>,
     };
 
-    const { Play, Pause, Dice5, Lock, Unlock, Sparkles, Sun, Hexagon, Aperture, Activity, Settings2, Moon, Stars, Wind, Zap, Waves, Snowflake, Radio, Bell, Droplets, CircleDot, Layers, Beaker, Music, Smile, Star, Mic, Square } = Icons;
+    const { Play, Pause, Home, Dice5, Lock, Unlock, Sparkles, Sun, Hexagon, Aperture, Activity, Settings2, Moon, Stars, Wind, Zap, Waves, Snowflake, Radio, Bell, Droplets, CircleDot, Layers, Beaker, Music, Smile, Star, Mic, Square } = Icons;
 
     // --- MUSIC THEORY ENGINE ---
     const SCALES = {
@@ -831,12 +832,17 @@
             
             {/* SIDEBAR */}
             <div className="w-full lg:w-64 bg-slate-950 border-b lg:border-b-0 lg:border-r border-slate-800 p-4 flex flex-col">
-               <div className="flex items-center gap-2 mb-2">
-                  <Hexagon className="w-6 h-6 text-white animate-pulse" />
-                  <div>
-                    <h1 className="text-xl font-bold tracking-tight text-white">PRISM <span className="text-pink-300">PRO</span></h1>
-                    <p className="text-[10px] text-slate-500 font-mono tracking-widest">96KHz 24-BIT STUDIO</p>
+               <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Hexagon className="w-6 h-6 text-white animate-pulse shrink-0" />
+                    <div>
+                      <h1 className="text-xl font-bold tracking-tight text-white">PRISM <span className="text-pink-300">PRO</span></h1>
+                      <p className="text-[10px] text-slate-500 font-mono tracking-widest">96KHz 24-BIT STUDIO</p>
+                    </div>
                   </div>
+                  <a href="index.html" aria-label="Back to AI Synth Lab" className="h-9 px-3 rounded-lg border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-900 flex items-center gap-2 text-[10px] font-bold tracking-widest transition-colors shrink-0">
+                    <Home className="w-3.5 h-3.5" /> LAB
+                  </a>
                </div>
                
                {/* --- CREDITS SECTION --- */}

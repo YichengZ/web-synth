@@ -16,6 +16,7 @@
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="recording.js"></script>
 
     <!-- Custom Styles -->
     <style>
@@ -42,6 +43,16 @@
 
         ::-webkit-scrollbar-thumb:hover {
             background: #475569;
+        }
+
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+
+        .record-pulse {
+            animation: pulse-red 1.5s infinite;
         }
 
         /* Range Input Styling */
@@ -87,6 +98,8 @@
             Circle: (p) => <IconBase {...p}><circle cx="12" cy="12" r="10" /></IconBase>,
             Zap: (p) => <IconBase {...p}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></IconBase>,
             ArrowUp: (p) => <IconBase {...p}><path d="m5 12 7-7 7 7" /><path d="M12 19V5" /></IconBase>,
+            Home: (p) => <IconBase {...p}><path d="m3 9 9-7 9 7" /><path d="M9 22V12h6v10" /><path d="M21 9v13H3V9" /></IconBase>,
+            Mic: (p) => <IconBase {...p}><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" /><line x1="8" x2="16" y1="22" y2="22" /></IconBase>,
             Music: (p) => <IconBase {...p}><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></IconBase>,
             Sliders: (p) => <IconBase {...p}><line x1="4" x2="4" y1="21" y2="14" /><line x1="4" x2="4" y1="10" y2="3" /><line x1="12" x2="12" y1="21" y2="12" /><line x1="12" x2="12" y1="8" y2="3" /><line x1="20" x2="20" y1="21" y2="16" /><line x1="20" x2="20" y1="12" y2="3" /><line x1="2" x2="6" y1="14" y2="14" /><line x1="10" x2="14" y1="8" y2="8" /><line x1="18" x2="22" y1="16" y2="16" /></IconBase>,
             Volume2: (p) => <IconBase {...p}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></IconBase>,
@@ -110,6 +123,9 @@
             const [audioCtx, setAudioCtx] = useState(null);
             const [masterBus, setMasterBus] = useState(null);
             const [analyser, setAnalyser] = useState(null);
+            const audioCtxRef = useRef(null);
+            const masterBusRef = useRef(null);
+            const recorderRef = useRef(null);
             const canvasRef = useRef(null);
             const [volume, setVolume] = useState(0.6);
             const animationRef = useRef(null);
@@ -142,6 +158,7 @@
             const [lockedParams, setLockedParams] = useState({});
             const [activePreset, setActivePreset] = useState('BUBBLE');
             const [lastTriggerTime, setLastTriggerTime] = useState(0);
+            const [isRecording, setIsRecording] = useState(false);
 
             // --- PRESETS ---
             const PRESETS = {
@@ -207,61 +224,68 @@
             };
 
             // --- Audio Init ---
-            useEffect(() => {
-                const initAudio = () => {
-                    if (!audioCtx) {
-                        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const initAudio = useCallback(() => {
+                if (!audioCtxRef.current) {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
 
-                        // Master Chain
-                        const masterGain = ctx.createGain();
-                        const compressor = ctx.createDynamicsCompressor();
-                        const analys = ctx.createAnalyser();
+                    // Master Chain
+                    const masterGain = ctx.createGain();
+                    const compressor = ctx.createDynamicsCompressor();
+                    const analys = ctx.createAnalyser();
 
-                        masterGain.gain.value = volume;
-                        analys.fftSize = 2048;
+                    masterGain.gain.value = volume;
+                    analys.fftSize = 2048;
 
-                        // Effects Bus
-                        const delayNode = ctx.createDelay();
-                        delayNode.delayTime.value = 0.20;
-                        const delayFeedback = ctx.createGain();
-                        delayFeedback.gain.value = 0.3;
-                        const delayFilter = ctx.createBiquadFilter();
-                        delayFilter.frequency.value = 1500;
-                        const delayGain = ctx.createGain();
+                    // Effects Bus
+                    const delayNode = ctx.createDelay();
+                    delayNode.delayTime.value = 0.20;
+                    const delayFeedback = ctx.createGain();
+                    delayFeedback.gain.value = 0.3;
+                    const delayFilter = ctx.createBiquadFilter();
+                    delayFilter.frequency.value = 1500;
+                    const delayGain = ctx.createGain();
 
-                        const wobbleLfo = ctx.createOscillator();
-                        wobbleLfo.type = 'sine';
-                        wobbleLfo.frequency.value = 0.5;
-                        const wobbleGain = ctx.createGain();
-                        wobbleGain.gain.value = 0.002;
-                        wobbleLfo.connect(wobbleGain);
-                        wobbleGain.connect(delayNode.delayTime);
-                        wobbleLfo.start();
+                    const wobbleLfo = ctx.createOscillator();
+                    wobbleLfo.type = 'sine';
+                    wobbleLfo.frequency.value = 0.5;
+                    const wobbleGain = ctx.createGain();
+                    wobbleGain.gain.value = 0.002;
+                    wobbleLfo.connect(wobbleGain);
+                    wobbleGain.connect(delayNode.delayTime);
+                    wobbleLfo.start();
 
-                        delayNode.connect(delayFeedback);
-                        delayFeedback.connect(delayFilter);
-                        delayFilter.connect(delayNode);
-                        delayNode.connect(delayGain);
+                    delayNode.connect(delayFeedback);
+                    delayFeedback.connect(delayFilter);
+                    delayFilter.connect(delayNode);
+                    delayNode.connect(delayGain);
 
-                        delayGain.connect(compressor);
-                        masterGain.connect(compressor);
-                        compressor.connect(analys);
-                        analys.connect(ctx.destination);
+                    delayGain.connect(compressor);
+                    masterGain.connect(compressor);
+                    compressor.connect(analys);
+                    recorderRef.current = WebSynthRecorder.createWavRecorder(ctx, analys);
+                    analys.connect(ctx.destination);
 
-                        setAudioCtx(ctx);
-                        setMasterBus({
-                            master: masterGain,
-                            delay: delayNode,
-                            delayGain: delayGain,
-                            wobbleGain: wobbleGain,
-                            analyser: analys
-                        });
-                        setAnalyser(analys);
-                    }
-                };
-                document.addEventListener('click', initAudio, { once: true });
-                return () => document.removeEventListener('click', initAudio);
-            }, [audioCtx, volume]);
+                    const bus = {
+                        master: masterGain,
+                        delay: delayNode,
+                        delayGain: delayGain,
+                        wobbleGain: wobbleGain,
+                        analyser: analys
+                    };
+
+                    audioCtxRef.current = ctx;
+                    masterBusRef.current = bus;
+                    setAudioCtx(ctx);
+                    setMasterBus(bus);
+                    setAnalyser(analys);
+                }
+
+                if (audioCtxRef.current.state === 'suspended') {
+                    audioCtxRef.current.resume();
+                }
+
+                return { ctx: audioCtxRef.current, bus: masterBusRef.current };
+            }, [volume]);
 
             useEffect(() => {
                 if (!audioCtx || !masterBus) return;
@@ -272,13 +296,16 @@
             }, [volume, params.delay, params.wobble, masterBus, audioCtx]);
 
             const triggerSound = useCallback((overrideFreq = null, overrideParams = null) => {
-                if (!audioCtx || !masterBus) return;
+                const ready = initAudio();
+                if (!ready || !ready.bus) return;
 
-                const t = audioCtx.currentTime;
+                const ctx = ready.ctx;
+                const bus = ready.bus;
+                const t = ctx.currentTime;
                 const p = overrideParams || params;
                 const baseFreq = overrideFreq || p.frequency;
 
-                const osc = audioCtx.createOscillator();
+                const osc = ctx.createOscillator();
                 osc.type = p.shape;
                 osc.frequency.setValueAtTime(baseFreq, t);
 
@@ -288,8 +315,8 @@
                 }
 
                 if (p.modDepth > 0) {
-                    const lfo = audioCtx.createOscillator();
-                    const lfoGain = audioCtx.createGain();
+                    const lfo = ctx.createOscillator();
+                    const lfoGain = ctx.createGain();
                     lfo.type = 'sine';
                     lfo.frequency.setValueAtTime(p.modSpeed, t);
                     lfoGain.gain.setValueAtTime(p.modDepth, t);
@@ -300,7 +327,7 @@
                     lfo.stop(t + p.decay + 0.1);
                 }
 
-                const filter = audioCtx.createBiquadFilter();
+                const filter = ctx.createBiquadFilter();
                 filter.type = 'lowpass';
                 filter.Q.value = p.filterQ;
                 filter.frequency.setValueAtTime(p.filterFreq, t);
@@ -313,7 +340,7 @@
                     filter.frequency.exponentialRampToValueAtTime(p.filterFreq, t + p.decay);
                 }
 
-                const gainNode = audioCtx.createGain();
+                const gainNode = ctx.createGain();
                 gainNode.gain.setValueAtTime(0, t);
                 gainNode.gain.linearRampToValueAtTime(1, t + (p.attack || 0.005));
                 gainNode.gain.exponentialRampToValueAtTime(0.001, t + p.decay);
@@ -321,14 +348,14 @@
                 osc.connect(filter);
                 filter.connect(gainNode);
 
-                gainNode.connect(masterBus.master);
-                gainNode.connect(masterBus.delay);
+                gainNode.connect(bus.master);
+                gainNode.connect(bus.delay);
 
                 osc.start(t);
                 osc.stop(t + p.decay + 0.2);
                 setLastTriggerTime(Date.now());
 
-            }, [audioCtx, masterBus, params]);
+            }, [initAudio, params]);
 
             // --- Visualizer ---
             useEffect(() => {
@@ -378,11 +405,18 @@
                     ctx.stroke();
 
                     ctx.shadowBlur = 0;
+
+                    if (isRecording) {
+                        ctx.strokeStyle = 'rgba(239, 68, 68, 0.75)';
+                        ctx.lineWidth = 4;
+                        ctx.strokeRect(2, 2, w - 4, h - 4);
+                    }
+
                     animationRef.current = requestAnimationFrame(draw);
                 };
                 draw();
                 return () => cancelAnimationFrame(animationRef.current);
-            }, [analyser, lastTriggerTime]);
+            }, [analyser, lastTriggerTime, isRecording]);
 
             const randomizeParams = () => {
                 const r = (min, max) => Math.random() * (max - min) + min;
@@ -434,20 +468,39 @@
                 triggerSound(null, newParams);
             };
 
+            const toggleRecording = () => {
+                const ready = initAudio();
+                if (!ready || !recorderRef.current) return;
+
+                if (isRecording) {
+                    setIsRecording(false);
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    recorderRef.current.stop(`KAWAII_REC_${activePreset}_${ready.ctx.sampleRate}hz_24bit_${timestamp}.wav`);
+                } else {
+                    recorderRef.current.start();
+                    setIsRecording(true);
+                }
+            };
+
             return (
                 <div className="min-h-screen bg-slate-950 text-slate-200 font-sans p-4 lg:p-8 flex items-center justify-center">
                     <div className="w-full max-w-7xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col lg:flex-row h-[90vh]">
 
                         {/* SIDEBAR */}
                         <div className="w-full lg:w-72 bg-slate-950 border-r border-slate-800 p-5 flex flex-col overflow-hidden">
-                            <div className="flex items-center gap-3 mb-6 shrink-0">
-                                <div className="bg-pink-500/10 p-2 rounded-lg border border-pink-500/20">
-                                    <Icons.Sparkles className="w-6 h-6 text-pink-400" />
+                            <div className="flex items-center justify-between gap-3 mb-6 shrink-0">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className="bg-pink-500/10 p-2 rounded-lg border border-pink-500/20">
+                                        <Icons.Sparkles className="w-6 h-6 text-pink-400" />
+                                    </div>
+                                    <div>
+                                        <h1 className="text-xl font-bold tracking-tight text-white">KAWAII <span className="text-pink-400">DSP</span></h1>
+                                        <p className="text-[10px] text-slate-500 font-mono tracking-widest">ANIME SFX ENGINE</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h1 className="text-xl font-bold tracking-tight text-white">KAWAII <span className="text-pink-400">DSP</span></h1>
-                                    <p className="text-[10px] text-slate-500 font-mono tracking-widest">ANIME SFX ENGINE</p>
-                                </div>
+                                <a href="index.html" aria-label="Back to AI Synth Lab" className="h-9 px-3 rounded-lg border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-900 flex items-center gap-2 text-[10px] font-bold tracking-widest transition-colors shrink-0">
+                                    <Icons.Home className="w-3.5 h-3.5" /> LAB
+                                </a>
                             </div>
 
                             {/* CREDITS */}
@@ -491,10 +544,13 @@
 
                             </div>
 
-                            <div className="pt-4 mt-4 border-t border-slate-800 shrink-0">
+                            <div className="pt-4 mt-4 border-t border-slate-800 shrink-0 space-y-2">
                                 <button onClick={randomizeParams} className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-pink-300 hover:text-white rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-all active:scale-95 border border-slate-800 group">
                                     <Icons.Dices className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" /> RANDOMIZE
                                     <span className="text-[9px] opacity-50 font-normal ml-1">(Respects Locks)</span>
+                                </button>
+                                <button onClick={toggleRecording} className={`w-full py-3 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-all active:scale-95 border ${isRecording ? 'bg-red-900/50 border-red-500 text-red-100 record-pulse' : 'border-slate-800 text-slate-300 hover:bg-slate-900 hover:text-white'}`}>
+                                    {isRecording ? <><Icons.Square className="w-4 h-4 fill-current animate-pulse" /> STOP REC</> : <><Icons.Mic className="w-4 h-4" /> REC WAV</>}
                                 </button>
                             </div>
                         </div>
@@ -506,6 +562,12 @@
                             <div className="h-20 bg-slate-950/50 border-b border-slate-800 flex items-center justify-between px-8 shrink-0 backdrop-blur-sm">
                                 {/* Left Side Empty (Was Play/Seq) */}
                                 <div className="flex items-center gap-6">
+                                    {isRecording && (
+                                        <div className="flex items-center gap-2 bg-red-500/10 px-3 py-1.5 rounded-full border border-red-500/50 record-pulse">
+                                            <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                            <span className="text-[10px] font-bold text-red-300 tracking-widest">RECORDING 24-BIT</span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="flex items-center gap-8">
@@ -531,6 +593,7 @@
                                     </div>
                                 )}
                                 <div className="absolute bottom-3 right-5 text-[10px] text-slate-600 font-mono pointer-events-none tracking-widest">OSCILLOSCOPE</div>
+                                {isRecording && <div className="absolute inset-0 border-2 border-red-500/70 pointer-events-none"></div>}
                             </div>
 
                             {/* CONTROLS */}
