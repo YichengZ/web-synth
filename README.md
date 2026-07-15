@@ -17,8 +17,13 @@ Every line of DSP (Digital Signal Processing) code and UI logic in this project 
 - **Concept:** Related low, mid, and high-frequency voices generated from one scene seed.
 - **Features:**
   - BURST and evolving DRIFT playback
-  - Five-band L3-style limiter and RC Inflator mastering presets
+  - Pitch-related harmonic voices instead of noise-based source layers
+  - Per-stem oversampled color drive followed by real-time STFT tonal denoising
+  - L3-style and RC Inflator presets plus a default BRUTAL serial bus
+  - BRUTAL: up to +18dB drive, five-band limiting, RC color, transient shaping, and a -1dB clip ceiling
   - Shared 96kHz, 24-bit stereo recorder
+
+The mastering presets are original Web Audio implementations inspired by public product behavior; they do not reproduce proprietary Waves or Musik Hack DSP code.
 
 ### 2. PRISM (Organic Light Physics Synth)
 - **Engine:** Web Audio API (96kHz ready)

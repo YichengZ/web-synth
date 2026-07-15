@@ -1,6 +1,6 @@
 import { createWavRecorder } from "./recording.js";
 
-const TAU = Math.PI * 2;
+const DSP_WORKLET_URL = new URL("./tonal-denoiser.worklet.js", import.meta.url);
 const SCALES = {
   DORIAN: [0, 2, 3, 5, 7, 9, 10],
   LYDIAN: [0, 2, 4, 6, 7, 9, 11],
@@ -8,7 +8,7 @@ const SCALES = {
   PENTATONIC: [0, 2, 4, 7, 9],
 };
 
-const MATERIALS = ["GLASS", "RUBBER", "PLASMA", "DUST"];
+const MATERIALS = ["GLASS", "RUBBER", "PLASMA", "ALLOY"];
 const SCALE_NAMES = Object.keys(SCALES);
 const CROSSOVERS = [90, 360, 1800, 6500];
 
@@ -76,6 +76,32 @@ const createCeilingCurve = (threshold = 0.78, ceilingDb = -1) => {
     curve[index] = Math.sign(input) * Math.min(ceiling, shaped);
   }
 
+  return curve;
+};
+
+const createSaturationCurve = (drive = 2, bias = 0, mix = 0.65) => {
+  const length = 65536;
+  const curve = new Float32Array(length);
+  const biasOffset = Math.tanh(bias);
+  const normalization = Math.max(0.001, Math.tanh(drive + Math.abs(bias)) - biasOffset);
+
+  for (let index = 0; index < length; index += 1) {
+    const input = (index * 2) / (length - 1) - 1;
+    const saturated = (Math.tanh(input * drive + bias) - biasOffset) / normalization;
+    curve[index] = input * (1 - mix) + saturated * mix;
+  }
+
+  return curve;
+};
+
+const createHardCeilingCurve = (ceilingDb = -1) => {
+  const length = 65536;
+  const curve = new Float32Array(length);
+  const ceiling = dbToGain(ceilingDb);
+  for (let index = 0; index < length; index += 1) {
+    const input = (index * 2) / (length - 1) - 1;
+    curve[index] = clamp(input, -ceiling, ceiling);
+  }
   return curve;
 };
 
@@ -223,6 +249,115 @@ const createInflatorMaster = (ctx) => {
   };
 };
 
+const createTransientShaper = (ctx, workletsReady, amount = 1.2) => {
+  if (!workletsReady) return ctx.createGain();
+  return new AudioWorkletNode(ctx, "transient-shaper", {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    outputChannelCount: [2],
+    channelCount: 2,
+    channelCountMode: "explicit",
+    processorOptions: { amount },
+  });
+};
+
+const createBrutalMaster = (ctx, workletsReady) => {
+  const input = ctx.createGain();
+  const dcFilter = createFilter(ctx, "highpass", 18, 0.7);
+  const sum = ctx.createGain();
+  const l3Limiter = ctx.createDynamicsCompressor();
+  const inflatorDrive = ctx.createGain();
+  const inflator = ctx.createWaveShaper();
+  const inflatorTrim = ctx.createGain();
+  const lowShelf = createFilter(ctx, "lowshelf", 92);
+  const bodyDip = createFilter(ctx, "peaking", 720, 0.58);
+  const highShelf = createFilter(ctx, "highshelf", 6800);
+  const colorDrive = ctx.createGain();
+  const color = ctx.createWaveShaper();
+  const colorTrim = ctx.createGain();
+  const transientShaper = createTransientShaper(ctx, workletsReady, 1.35);
+  const softClipper = ctx.createWaveShaper();
+  const hardCeiling = ctx.createWaveShaper();
+  const output = ctx.createGain();
+  const thresholds = [-8, -10.5, -12, -10, -8.5];
+  const releases = [0.26, 0.19, 0.12, 0.075, 0.045];
+  const priorities = [1.08, 1.035, 0.98, 1.035, 1.08];
+  const compressors = [];
+  const priorityGains = [];
+
+  input.gain.value = dbToGain(12);
+  sum.gain.value = 0.68;
+  l3Limiter.threshold.value = -4.5;
+  l3Limiter.knee.value = 1;
+  l3Limiter.ratio.value = 20;
+  l3Limiter.attack.value = 0.001;
+  l3Limiter.release.value = 0.075;
+  inflatorDrive.gain.value = dbToGain(3.5);
+  inflator.curve = createInflatorCurve(12, 62, false);
+  inflator.oversample = "4x";
+  inflatorTrim.gain.value = dbToGain(-7.5);
+  lowShelf.gain.value = 1.8;
+  bodyDip.gain.value = -1.1;
+  highShelf.gain.value = 2.2;
+  colorDrive.gain.value = dbToGain(4);
+  color.curve = createSaturationCurve(2.8, 0.075, 0.78);
+  color.oversample = "4x";
+  colorTrim.gain.value = dbToGain(-3.5);
+  softClipper.curve = createCeilingCurve(0.76, 0);
+  softClipper.oversample = "4x";
+  hardCeiling.curve = createHardCeilingCurve(-1);
+  hardCeiling.oversample = "4x";
+
+  input.connect(dcFilter);
+  thresholds.forEach((threshold, bandIndex) => {
+    const bandOutput = createBandPath(ctx, dcFilter, bandIndex);
+    const compressor = ctx.createDynamicsCompressor();
+    const priority = ctx.createGain();
+    compressor.threshold.value = threshold;
+    compressor.knee.value = bandIndex === 2 ? 2 : 1;
+    compressor.ratio.value = bandIndex === 2 ? 14 : 18;
+    compressor.attack.value = bandIndex < 2 ? 0.0025 : 0.001;
+    compressor.release.value = releases[bandIndex];
+    priority.gain.value = priorities[bandIndex];
+    bandOutput.connect(compressor);
+    compressor.connect(priority);
+    priority.connect(sum);
+    compressors.push(compressor);
+    priorityGains.push(priority);
+  });
+
+  connectSeries([
+    sum,
+    l3Limiter,
+    inflatorDrive,
+    inflator,
+    inflatorTrim,
+    lowShelf,
+    bodyDip,
+    highShelf,
+    colorDrive,
+    color,
+    colorTrim,
+    transientShaper,
+    softClipper,
+    hardCeiling,
+    output,
+  ]);
+
+  return {
+    input,
+    output,
+    compressors,
+    limiter: l3Limiter,
+    priorityGains,
+    lowShelf,
+    bodyDip,
+    highShelf,
+    inflator,
+    transientShaper,
+  };
+};
+
 const createImpulse = (ctx, duration = 1.7, decay = 2.8) => {
   const impulse = ctx.createBuffer(2, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
   for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
@@ -236,20 +371,62 @@ const createImpulse = (ctx, duration = 1.7, decay = 2.8) => {
   return impulse;
 };
 
-const createStemBuses = (ctx, mixBus) => {
-  const createStem = (name, filters = []) => {
-    const input = ctx.createGain();
-    const duck = ctx.createGain();
-    const level = ctx.createGain();
-    const nodes = [input, ...filters, duck, level, mixBus];
-    connectSeries(nodes);
-    return { name, input, duck, level };
-  };
+const createTonalDenoiser = (ctx, workletsReady, settings) => {
+  if (!workletsReady) return ctx.createGain();
+  return new AudioWorkletNode(ctx, "tonal-denoiser", {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    outputChannelCount: [2],
+    channelCount: 2,
+    channelCountMode: "explicit",
+    processorOptions: settings,
+  });
+};
 
-  const titan = createStem("titan", [createFilter(ctx, "lowpass", 420, 0.65)]);
+const createStemColor = (ctx, driveDb, curveSettings) => {
+  const drive = ctx.createGain();
+  const saturation = ctx.createWaveShaper();
+  const trim = ctx.createGain();
+  drive.gain.value = dbToGain(driveDb);
+  saturation.curve = createSaturationCurve(...curveSettings);
+  saturation.oversample = "4x";
+  trim.gain.value = dbToGain(-driveDb * 0.72);
+  return { drive, saturation, trim };
+};
+
+const createStemBuses = (ctx, mixBus, workletsReady) => {
+  const titanInput = ctx.createGain();
+  const titanLow = createFilter(ctx, "lowpass", 760, 0.65);
+  const titanColor = createStemColor(ctx, 9, [2.7, 0.055, 0.72]);
+  const titanDenoiser = createTonalDenoiser(ctx, workletsReady, {
+    amount: 0.78,
+    floorDb: -22,
+    lowPreserveHz: 165,
+  });
+  const titanDuck = ctx.createGain();
+  const titanLevel = ctx.createGain();
+  connectSeries([
+    titanInput,
+    titanLow,
+    titanColor.drive,
+    titanColor.saturation,
+    titanColor.trim,
+    titanDenoiser,
+    titanDuck,
+    titanLevel,
+    mixBus,
+  ]);
+
   const kawaiiInput = ctx.createGain();
   const kawaiiHigh = createFilter(ctx, "highpass", 130, 0.65);
-  const kawaiiLow = createFilter(ctx, "lowpass", 7200, 0.65);
+  const kawaiiLow = createFilter(ctx, "lowpass", 10500, 0.65);
+  const kawaiiSum = ctx.createGain();
+  const kawaiiColor = createStemColor(ctx, 8, [3.2, -0.045, 0.76]);
+  const kawaiiDenoiser = createTonalDenoiser(ctx, workletsReady, {
+    amount: 0.64,
+    floorDb: -18,
+    lowPreserveHz: 120,
+  });
   const kawaiiDuck = ctx.createGain();
   const kawaiiLevel = ctx.createGain();
   const kawaiiDelay = ctx.createDelay(1);
@@ -259,16 +436,34 @@ const createStemBuses = (ctx, mixBus) => {
   kawaiiDelay.delayTime.value = 0.23;
   kawaiiFeedback.gain.value = 0.22;
   kawaiiWet.gain.value = 0.18;
-  connectSeries([kawaiiInput, kawaiiHigh, kawaiiLow, kawaiiDuck, kawaiiLevel, mixBus]);
+  connectSeries([kawaiiInput, kawaiiHigh, kawaiiLow]);
+  kawaiiLow.connect(kawaiiSum);
   kawaiiLow.connect(kawaiiDelay);
   kawaiiDelay.connect(kawaiiDelayFilter);
   kawaiiDelayFilter.connect(kawaiiFeedback);
   kawaiiFeedback.connect(kawaiiDelay);
   kawaiiDelayFilter.connect(kawaiiWet);
-  kawaiiWet.connect(kawaiiDuck);
+  kawaiiWet.connect(kawaiiSum);
+  connectSeries([
+    kawaiiSum,
+    kawaiiColor.drive,
+    kawaiiColor.saturation,
+    kawaiiColor.trim,
+    kawaiiDenoiser,
+    kawaiiDuck,
+    kawaiiLevel,
+    mixBus,
+  ]);
 
   const prismInput = ctx.createGain();
   const prismHigh = createFilter(ctx, "highpass", 430, 0.65);
+  const prismSum = ctx.createGain();
+  const prismColor = createStemColor(ctx, 9.5, [3.6, 0.035, 0.8]);
+  const prismDenoiser = createTonalDenoiser(ctx, workletsReady, {
+    amount: 0.46,
+    floorDb: -13,
+    lowPreserveHz: 430,
+  });
   const prismDuck = ctx.createGain();
   const prismLevel = ctx.createGain();
   const prismDry = ctx.createGain();
@@ -280,15 +475,42 @@ const createStemBuses = (ctx, mixBus) => {
   prismInput.connect(prismHigh);
   prismHigh.connect(prismDry);
   prismHigh.connect(prismConvolver);
-  prismDry.connect(prismDuck);
+  prismDry.connect(prismSum);
   prismConvolver.connect(prismWet);
-  prismWet.connect(prismDuck);
-  connectSeries([prismDuck, prismLevel, mixBus]);
+  prismWet.connect(prismSum);
+  connectSeries([
+    prismSum,
+    prismColor.drive,
+    prismColor.saturation,
+    prismColor.trim,
+    prismDenoiser,
+    prismDuck,
+    prismLevel,
+    mixBus,
+  ]);
 
   return {
-    titan,
-    kawaii: { name: "kawaii", input: kawaiiInput, duck: kawaiiDuck, level: kawaiiLevel },
-    prism: { name: "prism", input: prismInput, duck: prismDuck, level: prismLevel },
+    titan: {
+      name: "titan",
+      input: titanInput,
+      duck: titanDuck,
+      level: titanLevel,
+      denoiser: titanDenoiser,
+    },
+    kawaii: {
+      name: "kawaii",
+      input: kawaiiInput,
+      duck: kawaiiDuck,
+      level: kawaiiLevel,
+      denoiser: kawaiiDenoiser,
+    },
+    prism: {
+      name: "prism",
+      input: prismInput,
+      duck: prismDuck,
+      level: prismLevel,
+      denoiser: prismDenoiser,
+    },
   };
 };
 
@@ -307,17 +529,10 @@ const scheduleDuck = (gain, time, depth, duration) => {
   gain.exponentialRampToValueAtTime(1, time + duration);
 };
 
-const createNoiseBuffer = (ctx, duration, rng) => {
-  const buffer = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * duration)), ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let index = 0; index < data.length; index += 1) data[index] = rng() * 2 - 1;
-  return buffer;
-};
-
 const createSceneDna = (seed, settings) => {
   const rng = createRandom(seed);
   const scaleName = SCALE_NAMES[Math.floor(rng() * SCALE_NAMES.length)];
-  const rootMidi = 41 + Math.floor(rng() * 10);
+  const rootMidi = 38 + Math.floor(rng() * 8);
   const contour = rng() > 0.5 ? 1 : -1;
   const material = MATERIALS[Math.floor(rng() * MATERIALS.length)];
   const density = clamp(settings.density, 0, 1);
@@ -352,45 +567,89 @@ const spawnTitan = (engine, dna, time) => {
   const { ctx, stems } = engine;
   const rng = dna.rng;
   const baseFrequency = midiToFrequency(dna.rootMidi - 12);
-  const duration = 1.3 + dna.energy * 1.5 + rng() * 0.45;
+  const duration = 1.7 + dna.energy * 1.8 + rng() * 0.55;
   const fundamental = ctx.createOscillator();
-  const harmonic = ctx.createOscillator();
+  const bodyLeft = ctx.createOscillator();
+  const bodyRight = ctx.createOscillator();
+  const upper = ctx.createOscillator();
+  const modulator = ctx.createOscillator();
+  const pitchedImpact = ctx.createOscillator();
   const fundamentalGain = ctx.createGain();
-  const harmonicGain = ctx.createGain();
-  const shaper = ctx.createWaveShaper();
-  const merger = ctx.createGain();
-  const impact = ctx.createBufferSource();
-  const impactFilter = createFilter(ctx, "lowpass", 240 + dna.tension * 520, 0.9);
+  const bodyLeftGain = ctx.createGain();
+  const bodyRightGain = ctx.createGain();
+  const upperGain = ctx.createGain();
+  const modulatorGain = ctx.createGain();
   const impactGain = ctx.createGain();
+  const bodyLeftPan = ctx.createStereoPanner();
+  const bodyRightPan = ctx.createStereoPanner();
+  const bodySum = ctx.createGain();
+  const bodyFilter = createFilter(ctx, "lowpass", 430 + dna.energy * 520, 0.8 + dna.tension * 2.5);
+  const bodyColor = ctx.createWaveShaper();
+  const impactFilter = createFilter(ctx, "bandpass", baseFrequency * 4.2, 1.2 + dna.tension * 2);
+  const dropStart = baseFrequency * (1.22 + dna.tension * 0.38);
+  const settleTime = time + 0.28 + dna.energy * 0.32;
 
   fundamental.type = "sine";
-  harmonic.type = dna.material === "RUBBER" ? "triangle" : "sine";
-  fundamental.frequency.setValueAtTime(baseFrequency * (2.1 + dna.tension * 0.8), time);
-  fundamental.frequency.exponentialRampToValueAtTime(baseFrequency, time + 0.45 + dna.energy * 0.7);
-  harmonic.frequency.setValueAtTime(baseFrequency * 2.03, time);
-  harmonic.frequency.exponentialRampToValueAtTime(baseFrequency * 1.01, time + duration * 0.65);
-  scheduleEnvelope(fundamentalGain.gain, time, 0.008, 0.36 + dna.energy * 0.17, duration);
-  scheduleEnvelope(harmonicGain.gain, time, 0.006, 0.06 + dna.tension * 0.05, duration * 0.72);
-  shaper.curve = createInflatorCurve(0, 18 + dna.energy * 20, false);
-  shaper.oversample = "2x";
-  impact.buffer = createNoiseBuffer(ctx, 0.28, rng);
-  scheduleEnvelope(impactGain.gain, time, 0.002, 0.1 + dna.energy * 0.1, 0.16);
+  bodyLeft.type = dna.material === "RUBBER" ? "triangle" : "sine";
+  bodyRight.type = dna.material === "PLASMA" ? "sawtooth" : "triangle";
+  upper.type = dna.material === "GLASS" ? "sine" : "triangle";
+  pitchedImpact.type = "sine";
+  modulator.type = "sine";
+  fundamental.frequency.setValueAtTime(dropStart, time);
+  fundamental.frequency.exponentialRampToValueAtTime(baseFrequency * 0.985, settleTime);
+  fundamental.frequency.exponentialRampToValueAtTime(baseFrequency, time + duration * 0.72);
+  bodyLeft.frequency.setValueAtTime(baseFrequency * 2.12, time);
+  bodyLeft.frequency.exponentialRampToValueAtTime(baseFrequency * 2.002, settleTime + 0.08);
+  bodyRight.frequency.setValueAtTime(baseFrequency * 2.16, time);
+  bodyRight.frequency.exponentialRampToValueAtTime(baseFrequency * 1.998, settleTime + 0.11);
+  upper.frequency.setValueAtTime(baseFrequency * (3.02 + dna.tension * 0.15), time);
+  upper.frequency.exponentialRampToValueAtTime(baseFrequency * 3.001, time + duration * 0.62);
+  pitchedImpact.frequency.setValueAtTime(baseFrequency * (6.5 + dna.tension * 1.8), time);
+  pitchedImpact.frequency.exponentialRampToValueAtTime(baseFrequency * 2.4, time + 0.13);
+  modulator.frequency.value = baseFrequency * (0.48 + dna.motion * 0.34);
+  modulatorGain.gain.value = 2.5 + dna.tension * 10;
+  scheduleEnvelope(fundamentalGain.gain, time, 0.006, 0.25 + dna.energy * 0.13, duration);
+  scheduleEnvelope(bodyLeftGain.gain, time, 0.005, 0.062 + dna.energy * 0.035, duration * 0.84);
+  scheduleEnvelope(bodyRightGain.gain, time, 0.007, 0.052 + dna.tension * 0.032, duration * 0.78);
+  scheduleEnvelope(upperGain.gain, time, 0.004, 0.026 + dna.energy * 0.024, duration * 0.62);
+  scheduleEnvelope(impactGain.gain, time, 0.0015, 0.085 + dna.energy * 0.06, 0.15);
+  bodyLeftPan.pan.value = -0.18 - dna.motion * 0.08;
+  bodyRightPan.pan.value = 0.18 + dna.motion * 0.08;
+  bodyColor.curve = createSaturationCurve(2.1, -0.035, 0.54);
+  bodyColor.oversample = "4x";
 
   fundamental.connect(fundamentalGain);
-  harmonic.connect(harmonicGain);
-  fundamentalGain.connect(merger);
-  harmonicGain.connect(merger);
-  merger.connect(shaper);
-  shaper.connect(stems.titan.input);
-  impact.connect(impactFilter);
+  fundamentalGain.connect(stems.titan.input);
+  modulator.connect(modulatorGain);
+  modulatorGain.connect(bodyLeft.frequency);
+  modulatorGain.connect(bodyRight.frequency);
+  modulatorGain.connect(upper.frequency);
+  bodyLeft.connect(bodyLeftGain);
+  bodyRight.connect(bodyRightGain);
+  upper.connect(upperGain);
+  bodyLeftGain.connect(bodyLeftPan);
+  bodyRightGain.connect(bodyRightPan);
+  bodyLeftPan.connect(bodySum);
+  bodyRightPan.connect(bodySum);
+  upperGain.connect(bodySum);
+  bodySum.connect(bodyFilter);
+  bodyFilter.connect(bodyColor);
+  bodyColor.connect(stems.titan.input);
+  pitchedImpact.connect(impactFilter);
   impactFilter.connect(impactGain);
   impactGain.connect(stems.titan.input);
   fundamental.start(time);
-  harmonic.start(time);
-  impact.start(time);
+  bodyLeft.start(time);
+  bodyRight.start(time);
+  upper.start(time);
+  modulator.start(time);
+  pitchedImpact.start(time);
   engine.registerSource(fundamental, time + duration + 0.2);
-  engine.registerSource(harmonic, time + duration + 0.2);
-  engine.registerSource(impact, time + 0.3);
+  engine.registerSource(bodyLeft, time + duration + 0.2);
+  engine.registerSource(bodyRight, time + duration + 0.2);
+  engine.registerSource(upper, time + duration + 0.2);
+  engine.registerSource(modulator, time + duration + 0.2);
+  engine.registerSource(pitchedImpact, time + 0.22);
   scheduleDuck(stems.kawaii.duck.gain, time, 0.76, 0.22 + dna.energy * 0.18);
   scheduleDuck(stems.prism.duck.gain, time, 0.68, 0.28 + dna.energy * 0.22);
   engine.signalVoice("titan", time, dna.energy);
@@ -400,7 +659,7 @@ const spawnTitan = (engine, dna, time) => {
 const spawnKawaii = (engine, dna, time, titan) => {
   const { ctx, stems } = engine;
   const rng = dna.rng;
-  const count = 2 + Math.floor(dna.density * 4);
+  const count = 3 + Math.floor(dna.density * 7);
   const notes = [];
   let previousDegree = dna.contour > 0 ? 0 : dna.scale.length - 1;
 
@@ -414,31 +673,48 @@ const spawnKawaii = (engine, dna, time, titan) => {
     const onset = time + 0.07 + index * (0.11 + (1 - dna.motion) * 0.1) + rng() * 0.055;
     const duration = 0.18 + rng() * (0.32 + dna.space * 0.34);
     const oscillator = ctx.createOscillator();
+    const harmonic = ctx.createOscillator();
     const fm = ctx.createOscillator();
     const fmGain = ctx.createGain();
-    const filter = createFilter(ctx, "lowpass", 1600 + dna.energy * 4200 + rng() * 1200, 2 + dna.tension * 8);
+    const oscillatorGain = ctx.createGain();
+    const harmonicGain = ctx.createGain();
+    const voiceSum = ctx.createGain();
+    const filter = createFilter(ctx, "lowpass", 1900 + dna.energy * 5600 + rng() * 1800, 1.6 + dna.tension * 6);
     const envelope = ctx.createGain();
     const panner = ctx.createStereoPanner();
     const targetRatio = 2 ** ((dna.contour * (1 + dna.tension * 4)) / 12);
+    const harmonicRatio = index % 3 === 0 ? 1.5 : 2;
 
     oscillator.type = dna.material === "GLASS" ? "sine" : index % 2 ? "triangle" : "sine";
+    harmonic.type = index % 4 === 0 ? "triangle" : "sine";
     oscillator.frequency.setValueAtTime(frequency, onset);
     oscillator.frequency.exponentialRampToValueAtTime(frequency * targetRatio, onset + duration * 0.72);
-    fm.frequency.value = 25 + dna.motion * 120 + rng() * 60;
-    fmGain.gain.setValueAtTime((18 + dna.tension * 150) * (0.7 + titan.baseFrequency / 180), onset);
+    harmonic.frequency.setValueAtTime(frequency * harmonicRatio, onset);
+    harmonic.frequency.exponentialRampToValueAtTime(frequency * harmonicRatio * targetRatio, onset + duration * 0.72);
+    fm.frequency.value = titan.baseFrequency * [0.5, 1, 1.5, 2][index % 4] * (0.98 + rng() * 0.04);
+    fmGain.gain.setValueAtTime(4 + dna.tension * 62 + dna.motion * 22, onset);
     fmGain.gain.exponentialRampToValueAtTime(0.01, onset + duration);
-    scheduleEnvelope(envelope.gain, onset, 0.006, 0.075 + dna.energy * 0.055, duration);
+    oscillatorGain.gain.value = 0.72;
+    harmonicGain.gain.value = 0.16 + dna.tension * 0.12;
+    scheduleEnvelope(envelope.gain, onset, 0.006, 0.058 + dna.energy * 0.044, duration);
     panner.pan.value = clamp((index / Math.max(1, count - 1)) * 1.4 - 0.7 + (rng() - 0.5) * 0.3, -1, 1);
     fm.connect(fmGain);
     fmGain.connect(oscillator.frequency);
-    oscillator.connect(filter);
+    fmGain.connect(harmonic.frequency);
+    oscillator.connect(oscillatorGain);
+    harmonic.connect(harmonicGain);
+    oscillatorGain.connect(voiceSum);
+    harmonicGain.connect(voiceSum);
+    voiceSum.connect(filter);
     filter.connect(envelope);
     envelope.connect(panner);
     panner.connect(stems.kawaii.input);
     fm.start(onset);
     oscillator.start(onset);
+    harmonic.start(onset);
     engine.registerSource(fm, onset + duration + 0.1);
     engine.registerSource(oscillator, onset + duration + 0.1);
+    engine.registerSource(harmonic, onset + duration + 0.1);
     notes.push({ frequency, onset, duration, degree });
     engine.signalVoice("kawaii", onset, dna.energy * 0.82);
   }
@@ -449,13 +725,13 @@ const spawnKawaii = (engine, dna, time, titan) => {
 const spawnPrism = (engine, dna, time, motif) => {
   const { ctx, stems } = engine;
   const rng = dna.rng;
-  const count = 4 + Math.floor(dna.density * 9);
+  const count = 6 + Math.floor(dna.density * 12);
   const sourceNotes = motif.length ? motif : [{ frequency: midiToFrequency(dna.rootMidi + 24), onset: time }];
 
   for (let index = 0; index < count; index += 1) {
     const parent = sourceNotes[index % sourceNotes.length];
-    const relation = [1.5, 2, 2.5, 3, 4][Math.floor(rng() * 5)];
-    const frequency = clamp(parent.frequency * relation * (1 + (rng() - 0.5) * (1 - dna.affinity) * 0.08), 520, 15000);
+    const relation = [1.5, 2, 2.5, 3, 4, 5][(index + Math.floor(rng() * 3)) % 6];
+    const frequency = clamp(parent.frequency * relation * (1 + (rng() - 0.5) * (1 - dna.affinity) * 0.055), 480, 18000);
     const onset = Math.max(time + 0.18, parent.onset + 0.12 + rng() * (0.5 + dna.space * 1.3));
     const duration = 0.2 + rng() * (0.5 + dna.space * 1.25);
     const oscillator = ctx.createOscillator();
@@ -463,11 +739,11 @@ const spawnPrism = (engine, dna, time, motif) => {
     const panner = ctx.createStereoPanner();
     const highpass = createFilter(ctx, "highpass", Math.min(6000, frequency * 0.45), 0.7);
 
-    oscillator.type = "sine";
+    oscillator.type = index % 5 === 0 ? "triangle" : "sine";
     oscillator.frequency.setValueAtTime(frequency, onset);
     oscillator.detune.setValueAtTime((rng() - 0.5) * (8 + dna.motion * 34), onset);
     oscillator.detune.linearRampToValueAtTime((rng() - 0.5) * 60 * dna.motion, onset + duration);
-    scheduleEnvelope(envelope.gain, onset, 0.008 + rng() * 0.03, 0.025 + dna.energy * 0.028, duration);
+    scheduleEnvelope(envelope.gain, onset, 0.008 + rng() * 0.03, 0.018 + dna.energy * 0.022, duration);
     panner.pan.value = clamp((rng() * 2 - 1) * (0.45 + dna.motion * 0.5), -1, 1);
     oscillator.connect(highpass);
     highpass.connect(envelope);
@@ -478,19 +754,30 @@ const spawnPrism = (engine, dna, time, motif) => {
     engine.signalVoice("prism", onset, dna.energy * 0.65);
   }
 
-  if (dna.space > 0.42) {
-    const air = ctx.createBufferSource();
-    const airFilter = createFilter(ctx, "bandpass", 6500 + dna.tension * 4500, 0.8 + dna.tension * 2);
-    const airEnvelope = ctx.createGain();
-    const onset = time + 0.35 + rng() * 0.5;
-    const duration = 1 + dna.space * 2.2;
-    air.buffer = createNoiseBuffer(ctx, duration, rng);
-    scheduleEnvelope(airEnvelope.gain, onset, 0.18, 0.018 + dna.energy * 0.02, duration);
-    air.connect(airFilter);
-    airFilter.connect(airEnvelope);
-    airEnvelope.connect(stems.prism.input);
-    air.start(onset);
-    engine.registerSource(air, onset + duration + 0.1);
+  if (dna.space > 0.34) {
+    const bloomCount = 3 + Math.floor(dna.density * 3);
+    for (let index = 0; index < bloomCount; index += 1) {
+      const parent = sourceNotes[index % sourceNotes.length];
+      const oscillator = ctx.createOscillator();
+      const envelope = ctx.createGain();
+      const panner = ctx.createStereoPanner();
+      const onset = time + 0.3 + index * 0.075 + rng() * 0.18;
+      const duration = 0.9 + dna.space * 2 + rng() * 0.45;
+      const ratio = [2, 3, 4, 5, 6][index % 5];
+      const frequency = clamp(parent.frequency * ratio, 1200, 17500);
+      oscillator.type = index % 3 === 0 ? "triangle" : "sine";
+      oscillator.frequency.setValueAtTime(frequency, onset);
+      oscillator.detune.setValueAtTime((index - bloomCount / 2) * (2 + dna.motion * 5), onset);
+      oscillator.detune.linearRampToValueAtTime((rng() - 0.5) * 22 * dna.motion, onset + duration);
+      scheduleEnvelope(envelope.gain, onset, 0.1 + rng() * 0.14, 0.009 + dna.energy * 0.012, duration);
+      panner.pan.value = clamp((index / Math.max(1, bloomCount - 1)) * 1.6 - 0.8, -1, 1);
+      oscillator.connect(envelope);
+      envelope.connect(panner);
+      panner.connect(stems.prism.input);
+      oscillator.start(onset);
+      engine.registerSource(oscillator, onset + duration + 0.1);
+      engine.signalVoice("prism", onset, dna.energy * 0.48);
+    }
   }
 };
 
@@ -501,44 +788,68 @@ export class ConvergenceEngine {
     this.onRecordLimit = onRecordLimit;
     this.activeSources = new Set();
     this.driftTimer = null;
-    this.masterMode = "MULTIBAND";
-    this.masterDrive = 4.5;
-    this.masterTone = 0.55;
+    this.masterMode = "BRUTAL";
+    this.masterDrive = 12;
+    this.masterTone = 0.62;
+    this.outputLevel = 1;
+    this.stemLevels = { titan: 0.88, kawaii: 0.82, prism: 0.8 };
+    this.workletsReady = false;
   }
 
-  init() {
-    if (this.ctx) {
-      if (this.ctx.state === "suspended") this.ctx.resume();
-      return this;
+  async init() {
+    if (!this.ctx) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      this.ctx = new AudioContext({ sampleRate: 96000, latencyHint: "interactive" });
+      if (this.ctx.state === "suspended") this.ctx.resume().catch(() => {});
+      this.readyPromise = this.buildGraph();
     }
 
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    this.ctx = new AudioContext({ sampleRate: 96000, latencyHint: "interactive" });
+    await this.readyPromise;
+    if (this.ctx.state === "suspended") await this.ctx.resume();
+    return this;
+  }
+
+  async buildGraph() {
+    if (this.ctx.audioWorklet) {
+      try {
+        await this.ctx.audioWorklet.addModule(DSP_WORKLET_URL);
+        this.workletsReady = true;
+      } catch (error) {
+        console.warn("CONVERGENCE DSP worklets unavailable; using transparent fallbacks.", error);
+      }
+    }
+
     this.mixBus = this.ctx.createGain();
-    this.mixBus.gain.value = 0.78;
-    this.stems = createStemBuses(this.ctx, this.mixBus);
-    this.stems.titan.level.gain.value = 0.92;
-    this.stems.kawaii.level.gain.value = 0.86;
-    this.stems.prism.level.gain.value = 0.84;
+    this.mixBus.gain.value = 0.68;
+    this.stems = createStemBuses(this.ctx, this.mixBus, this.workletsReady);
+    Object.entries(this.stemLevels).forEach(([stem, level]) => {
+      this.stems[stem].level.gain.value = level;
+    });
 
     this.multiband = createMultibandMaster(this.ctx);
     this.inflator = createInflatorMaster(this.ctx);
+    this.brutal = createBrutalMaster(this.ctx, this.workletsReady);
     this.multibandModeGain = this.ctx.createGain();
     this.inflatorModeGain = this.ctx.createGain();
+    this.brutalModeGain = this.ctx.createGain();
     this.masterGain = this.ctx.createGain();
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 4096;
     this.analyser.smoothingTimeConstant = 0.72;
-    this.masterGain.gain.value = 1;
-    this.multibandModeGain.gain.value = 1;
-    this.inflatorModeGain.gain.value = 0;
+    this.masterGain.gain.value = this.outputLevel;
+    this.multibandModeGain.gain.value = this.masterMode === "MULTIBAND" ? 1 : 0;
+    this.inflatorModeGain.gain.value = this.masterMode === "INFLATOR" ? 1 : 0;
+    this.brutalModeGain.gain.value = this.masterMode === "BRUTAL" ? 1 : 0;
 
     this.mixBus.connect(this.multiband.input);
     this.mixBus.connect(this.inflator.input);
+    this.mixBus.connect(this.brutal.input);
     this.multiband.output.connect(this.multibandModeGain);
     this.inflator.output.connect(this.inflatorModeGain);
+    this.brutal.output.connect(this.brutalModeGain);
     this.multibandModeGain.connect(this.masterGain);
     this.inflatorModeGain.connect(this.masterGain);
+    this.brutalModeGain.connect(this.masterGain);
     this.masterGain.connect(this.analyser);
     this.recorder = createWavRecorder(this.ctx, this.analyser, {
       onLimit: () => this.onRecordLimit?.(),
@@ -546,28 +857,29 @@ export class ConvergenceEngine {
     this.analyser.connect(this.ctx.destination);
     this.setMasterDrive(this.masterDrive);
     this.setMasterTone(this.masterTone);
-    return this;
   }
 
   setMasterMode(mode) {
-    this.init();
-    this.masterMode = mode === "INFLATOR" ? "INFLATOR" : "MULTIBAND";
+    this.masterMode = ["MULTIBAND", "INFLATOR", "BRUTAL"].includes(mode) ? mode : "BRUTAL";
+    if (!this.brutalModeGain) return;
     const time = this.ctx.currentTime;
     this.multibandModeGain.gain.setTargetAtTime(this.masterMode === "MULTIBAND" ? 1 : 0, time, 0.025);
     this.inflatorModeGain.gain.setTargetAtTime(this.masterMode === "INFLATOR" ? 1 : 0, time, 0.025);
+    this.brutalModeGain.gain.setTargetAtTime(this.masterMode === "BRUTAL" ? 1 : 0, time, 0.025);
   }
 
   setMasterDrive(value) {
-    this.masterDrive = clamp(Number(value), 0, 9);
-    if (!this.ctx) return;
+    this.masterDrive = clamp(Number(value), 0, 18);
+    if (!this.brutal) return;
     const time = this.ctx.currentTime;
     this.multiband.input.gain.setTargetAtTime(dbToGain(this.masterDrive), time, 0.04);
     this.inflator.input.gain.setTargetAtTime(dbToGain(this.masterDrive), time, 0.04);
+    this.brutal.input.gain.setTargetAtTime(dbToGain(this.masterDrive), time, 0.04);
   }
 
   setMasterTone(value) {
     this.masterTone = clamp(Number(value), 0, 1);
-    if (!this.ctx) return;
+    if (!this.brutal) return;
     const time = this.ctx.currentTime;
     const multibandPriorities = [
       1.01 + this.masterTone * 0.1,
@@ -587,16 +899,35 @@ export class ConvergenceEngine {
       25 + this.masterTone * 24,
       false,
     );
+    const brutalPriorities = [
+      1.02 + this.masterTone * 0.12,
+      1.01 + this.masterTone * 0.04,
+      1.01 - this.masterTone * 0.055,
+      1 + this.masterTone * 0.055,
+      1.015 + this.masterTone * 0.13,
+    ];
+    this.brutal.priorityGains.forEach((gain, index) => {
+      gain.gain.setTargetAtTime(brutalPriorities[index], time, 0.05);
+    });
+    this.brutal.lowShelf.gain.setTargetAtTime(0.6 + this.masterTone * 2.2, time, 0.05);
+    this.brutal.bodyDip.gain.setTargetAtTime(-0.35 - this.masterTone * 1.35, time, 0.05);
+    this.brutal.highShelf.gain.setTargetAtTime(0.7 + this.masterTone * 2.8, time, 0.05);
+    this.brutal.inflator.curve = createInflatorCurve(
+      7 + this.masterTone * 15,
+      48 + this.masterTone * 24,
+      false,
+    );
   }
 
   setOutputLevel(value) {
-    this.init();
-    this.masterGain.gain.setTargetAtTime(clamp(Number(value), 0, 1), this.ctx.currentTime, 0.05);
+    this.outputLevel = clamp(Number(value), 0, 1);
+    if (this.masterGain) this.masterGain.gain.setTargetAtTime(this.outputLevel, this.ctx.currentTime, 0.05);
   }
 
   setStemLevel(stem, value) {
-    this.init();
-    const target = this.stems[stem];
+    const level = clamp(Number(value), 0, 1.2);
+    if (stem in this.stemLevels) this.stemLevels[stem] = level;
+    const target = this.stems?.[stem];
     if (target) target.level.gain.setTargetAtTime(clamp(Number(value), 0, 1.2), this.ctx.currentTime, 0.05);
   }
 
@@ -612,7 +943,6 @@ export class ConvergenceEngine {
   }
 
   scheduleScene(settings, seed, startTime = this.ctx.currentTime + 0.035) {
-    this.init();
     const dna = createSceneDna(seed, settings);
     const titan = spawnTitan(this, dna, startTime);
     const motif = spawnKawaii(this, dna, startTime, titan);
@@ -628,12 +958,10 @@ export class ConvergenceEngine {
   }
 
   burst(settings, seed) {
-    this.init();
     return this.scheduleScene(settings, seed);
   }
 
   startDrift(settingsProvider, seed) {
-    this.init();
     this.stopDrift();
     let currentSeed = hashSeed(seed);
     let nextSceneTime = this.ctx.currentTime + 0.04;
@@ -663,8 +991,10 @@ export class ConvergenceEngine {
   }
 
   getMeterState() {
-    if (!this.ctx) return { reductions: [0, 0, 0, 0, 0], limiter: 0 };
-    const chain = this.masterMode === "MULTIBAND" ? this.multiband : this.inflator;
+    if (!this.brutal) return { reductions: [0, 0, 0, 0, 0], limiter: 0 };
+    const chain = this.masterMode === "MULTIBAND"
+      ? this.multiband
+      : this.masterMode === "INFLATOR" ? this.inflator : this.brutal;
     return {
       reductions: chain.compressors.map((compressor) => Math.abs(compressor.reduction || 0)),
       limiter: Math.abs(chain.limiter.reduction || 0),
@@ -672,7 +1002,7 @@ export class ConvergenceEngine {
   }
 
   async startRecording() {
-    this.init();
+    await this.init();
     await this.recorder.start();
   }
 

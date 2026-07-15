@@ -76,15 +76,33 @@ test("Kawaii sliders keep visible progress and track contrast", async ({ page })
   expect(appearance.borderColor).toBe("rgb(51, 65, 85)");
 });
 
-test("CONVERGENCE switches between both master bus presets", async ({ page }) => {
+test("CONVERGENCE switches between all master bus presets", async ({ page }) => {
   await page.goto("/Convergence.html");
   const multiband = page.getByRole("button", { name: "L3-STYLE" });
   const inflator = page.getByRole("button", { name: "INFLATOR" });
+  const brutal = page.getByRole("button", { name: "BRUTAL" });
+  await expect(brutal).toHaveAttribute("aria-pressed", "true");
+  await multiband.click();
   await expect(multiband).toHaveAttribute("aria-pressed", "true");
   await inflator.click();
   await expect(inflator).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByLabel("Loud")).toBeVisible();
+  await brutal.click();
+  await expect(brutal).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("Drive")).toHaveValue("12");
   await expect(page.getByLabel("Tone")).toBeVisible();
+});
+
+test("CONVERGENCE initializes tonal worklets at 96 kHz", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error" || message.type() === "warning") errors.push(message.text());
+  });
+  await page.goto("/Convergence.html");
+  await page.getByRole("button", { name: "Generate convergence burst" }).click();
+  await expect(page.getByText("96 KHZ")).toHaveText("96 KHZ");
+  await expect(page.getByText(/COLOR > TONAL/)).toHaveCount(3);
+  expect(errors).toEqual([]);
 });
 
 test.describe("recording", () => {
@@ -108,8 +126,12 @@ test.describe("recording", () => {
       name: "CONVERGENCE MULTIBAND",
       path: "/Convergence.html",
       recordName: "REC WAV",
-      trigger: (page) => page.getByRole("button", { name: "Generate convergence burst" }).click(),
+      trigger: async (page) => {
+        await page.getByRole("button", { name: "L3-STYLE" }).click();
+        await page.getByRole("button", { name: "Generate convergence burst" }).click();
+      },
       expectStereo: true,
+      expectCeiling: true,
       captureSeconds: 0.45,
     },
     {
@@ -121,6 +143,16 @@ test.describe("recording", () => {
         await page.getByRole("button", { name: "Generate convergence burst" }).click();
       },
       expectStereo: true,
+      expectCeiling: true,
+      captureSeconds: 0.45,
+    },
+    {
+      name: "CONVERGENCE BRUTAL",
+      path: "/Convergence.html",
+      recordName: "REC WAV",
+      trigger: (page) => page.getByRole("button", { name: "Generate convergence burst" }).click(),
+      expectStereo: true,
+      expectCeiling: true,
       captureSeconds: 0.45,
     },
   ];
@@ -139,6 +171,7 @@ test.describe("recording", () => {
       });
       await page.goto(recordingCase.path);
       await page.getByRole("button", { name: recordingCase.recordName, exact: true }).first().click();
+      await expect(page.getByRole("button", { name: /^STOP/ }).first()).toBeVisible();
       const startTime = await page.evaluate(() => window.__testAudioContext.currentTime);
       await recordingCase.trigger(page);
       await page.waitForFunction(
@@ -170,6 +203,7 @@ test.describe("recording", () => {
         peak = Math.max(peak, Math.abs(sample / 0x800000));
       }
       expect(peak).toBeGreaterThan(0.001);
+      if (recordingCase.expectCeiling) expect(peak).toBeLessThan(0.9);
 
       if (recordingCase.expectStereo) {
         let stereoDifference = 0;

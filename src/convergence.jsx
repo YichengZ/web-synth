@@ -16,9 +16,9 @@ const DEFAULT_SETTINGS = {
 };
 
 const STEMS = [
-  { id: "titan", name: "TITAN", range: "25-420 HZ", color: "#f97316" },
-  { id: "kawaii", name: "KAWAII", range: "130 HZ-7.2 KHZ", color: "#ec4899" },
-  { id: "prism", name: "PRISM", range: "430 HZ-16 KHZ", color: "#22d3ee" },
+  { id: "titan", name: "TITAN", range: "30-760 HZ", color: "#f97316" },
+  { id: "kawaii", name: "KAWAII", range: "130 HZ-10.5 KHZ", color: "#ec4899" },
+  { id: "prism", name: "PRISM", range: "430 HZ-18 KHZ", color: "#22d3ee" },
 ];
 
 const BANDS = ["SUB", "LOW", "MID", "HIGH", "AIR"];
@@ -67,8 +67,8 @@ const Convergence = () => {
   const animationRef = useRef(null);
   const [settings, setSettings] = usePersistentState("web-synth.convergence.settings", DEFAULT_SETTINGS);
   const [seed, setSeed] = usePersistentState("web-synth.convergence.seed", 20260716);
-  const [masterMode, setMasterMode] = usePersistentState("web-synth.convergence.masterMode", "MULTIBAND");
-  const [masterDrive, setMasterDrive] = usePersistentState("web-synth.convergence.masterDrive", 4.5);
+  const [masterMode, setMasterMode] = usePersistentState("web-synth.convergence.masterMode.v2", "BRUTAL");
+  const [masterDrive, setMasterDrive] = usePersistentState("web-synth.convergence.masterDrive.v2", 12);
   const [masterTone, setMasterTone] = usePersistentState("web-synth.convergence.masterTone", 0.55);
   const [outputLevel, setOutputLevel] = usePersistentState("web-synth.convergence.outputLevel", 1);
   const [stemLevels, setStemLevels] = usePersistentState("web-synth.convergence.stems", {
@@ -96,7 +96,7 @@ const Convergence = () => {
     await engine.stopRecording(`CONVERGENCE_LIMIT_${engine.ctx.sampleRate}hz_24bit_${timestamp}.wav`);
   }, []);
 
-  const getEngine = useCallback(() => {
+  const getEngine = useCallback(async () => {
     if (!engineRef.current) {
       engineRef.current = new ConvergenceEngine({
         onScene: setScene,
@@ -107,7 +107,7 @@ const Convergence = () => {
       });
     }
 
-    const engine = engineRef.current.init();
+    const engine = await engineRef.current.init();
     recorderRef.current = engine.recorder;
     engine.setMasterMode(masterMode);
     engine.setMasterDrive(masterDrive);
@@ -217,24 +217,24 @@ const Convergence = () => {
 
   useEffect(() => () => engineRef.current?.destroy(), []);
 
-  const triggerBurst = useCallback(() => {
-    const engine = getEngine();
+  const triggerBurst = useCallback(async () => {
+    const engine = await getEngine();
     engine.stopDrift();
     setDrifting(false);
     engine.burst(settingsRef.current, seed);
   }, [getEngine, seed]);
 
-  const evolve = useCallback(() => {
+  const evolve = useCallback(async () => {
     const evolved = nextSeed(seed);
     setSeed(evolved);
-    const engine = getEngine();
+    const engine = await getEngine();
     engine.stopDrift();
     setDrifting(false);
     engine.burst(settingsRef.current, evolved);
   }, [getEngine, seed, setSeed]);
 
-  const toggleDrift = useCallback(() => {
-    const engine = getEngine();
+  const toggleDrift = useCallback(async () => {
+    const engine = await getEngine();
     if (drifting) {
       engine.stopDrift();
       setDrifting(false);
@@ -250,7 +250,7 @@ const Convergence = () => {
   }, []);
 
   const toggleRecording = useCallback(async () => {
-    const engine = getEngine();
+    const engine = await getEngine();
     if (isRecording) {
       setIsRecording(false);
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -280,7 +280,7 @@ const Convergence = () => {
 
   const setMacro = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
   const setStem = (stem, value) => setStemLevels((current) => ({ ...current, [stem]: value }));
-  const displayedReductions = masterMode === "MULTIBAND"
+  const displayedReductions = masterMode === "MULTIBAND" || masterMode === "BRUTAL"
     ? [...meters.reductions, 0, 0, 0, 0, 0].slice(0, 5)
     : [0, 0, meters.reductions[0] || 0, 0, 0];
 
@@ -292,7 +292,7 @@ const Convergence = () => {
             <div className="flex items-center gap-3">
               <span className="h-2.5 w-2.5 rounded-full bg-[#d8ff3e] shadow-[0_0_14px_rgba(216,255,62,0.65)]" />
               <h1 className="truncate text-base font-black uppercase sm:text-lg">CONVERGENCE</h1>
-              <span className="hidden border-l border-zinc-700 pl-3 font-mono text-[10px] text-zinc-500 sm:inline">FUSION DSP 01</span>
+              <span className="hidden border-l border-zinc-700 pl-3 font-mono text-[10px] text-zinc-500 sm:inline">FUSION DSP 02</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -357,7 +357,7 @@ const Convergence = () => {
                   <div className="mb-4 flex items-center justify-between">
                     <div>
                       <div className="text-xs font-black" style={{ color: stem.color }}>{stem.name}</div>
-                      <div className="mt-1 font-mono text-[9px] text-zinc-600">{stem.range}</div>
+                      <div className="mt-1 font-mono text-[9px] text-zinc-600">{stem.range} / COLOR &gt; TONAL</div>
                     </div>
                     <span className="h-2.5 w-2.5 rounded-full transition-shadow" style={{ backgroundColor: stem.color, opacity: 0.25 + activity[stem.id] * 0.75, boxShadow: activity[stem.id] > 0.2 ? `0 0 ${8 + activity[stem.id] * 16}px ${stem.color}` : "none" }} />
                   </div>
@@ -374,15 +374,16 @@ const Convergence = () => {
               <h2 className="text-[11px] font-black uppercase text-zinc-300">MASTER BUS</h2>
               <span className="font-mono text-[9px] text-zinc-600">CEILING -1.0 DB</span>
             </div>
-            <div className="grid grid-cols-2 overflow-hidden rounded border border-zinc-700 p-1">
+            <div className="grid grid-cols-3 overflow-hidden rounded border border-zinc-700 p-1">
               <button onClick={() => setMasterMode("MULTIBAND")} aria-pressed={masterMode === "MULTIBAND"} className={`h-9 rounded-sm text-[10px] font-black uppercase ${masterMode === "MULTIBAND" ? "bg-[#d8ff3e] text-black" : "text-zinc-500 hover:text-zinc-200"}`}>L3-STYLE</button>
               <button onClick={() => setMasterMode("INFLATOR")} aria-pressed={masterMode === "INFLATOR"} className={`h-9 rounded-sm text-[10px] font-black uppercase ${masterMode === "INFLATOR" ? "bg-[#ff6b35] text-black" : "text-zinc-500 hover:text-zinc-200"}`}>INFLATOR</button>
+              <button onClick={() => setMasterMode("BRUTAL")} aria-pressed={masterMode === "BRUTAL"} className={`h-9 rounded-sm text-[10px] font-black uppercase ${masterMode === "BRUTAL" ? "bg-red-500 text-white" : "text-zinc-500 hover:text-zinc-200"}`}>BRUTAL</button>
             </div>
           </section>
 
           <section className="border-b border-zinc-800 px-4 py-5 sm:px-6">
             <div className="grid gap-6">
-              <Slider label="Loud" value={masterDrive} min={0} max={9} step={0.1} suffix=" dB" accent={masterMode === "MULTIBAND" ? "#d8ff3e" : "#ff6b35"} onChange={setMasterDrive} />
+              <Slider label="Drive" value={masterDrive} min={0} max={18} step={0.1} suffix=" dB" accent={masterMode === "BRUTAL" ? "#ef4444" : masterMode === "MULTIBAND" ? "#d8ff3e" : "#ff6b35"} onChange={setMasterDrive} />
               <Slider label="Tone" value={masterTone} accent="#22d3ee" onChange={setMasterTone} />
               <Slider label="Output" value={outputLevel} accent="#f8fafc" onChange={setOutputLevel} />
             </div>
@@ -408,7 +409,7 @@ const Convergence = () => {
               </div>
               <div className="bg-[#090d14] p-3">
                 <div className="text-[9px] font-black text-zinc-600">MASTER</div>
-                <div className="mt-1 font-mono text-xs text-zinc-200">{masterMode === "MULTIBAND" ? "5 BAND" : "RC CURVE"}</div>
+                <div className="mt-1 font-mono text-xs text-zinc-200">{masterMode === "BRUTAL" ? "SERIAL CLIP" : masterMode === "MULTIBAND" ? "5 BAND" : "RC CURVE"}</div>
               </div>
               <div className="bg-[#090d14] p-3">
                 <div className="text-[9px] font-black text-zinc-600">SCENE</div>
