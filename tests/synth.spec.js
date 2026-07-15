@@ -110,6 +110,7 @@ test.describe("recording", () => {
       recordName: "REC WAV",
       trigger: (page) => page.getByRole("button", { name: "Generate convergence burst" }).click(),
       expectStereo: true,
+      captureSeconds: 0.45,
     },
     {
       name: "CONVERGENCE INFLATOR",
@@ -120,6 +121,7 @@ test.describe("recording", () => {
         await page.getByRole("button", { name: "Generate convergence burst" }).click();
       },
       expectStereo: true,
+      captureSeconds: 0.45,
     },
   ];
 
@@ -140,8 +142,8 @@ test.describe("recording", () => {
       const startTime = await page.evaluate(() => window.__testAudioContext.currentTime);
       await recordingCase.trigger(page);
       await page.waitForFunction(
-        (start) => window.__testAudioContext.currentTime - start >= 0.2,
-        startTime,
+        ({ start, duration }) => window.__testAudioContext.currentTime - start >= duration,
+        { start: startTime, duration: recordingCase.captureSeconds || 0.2 },
         { timeout: 20_000 },
       );
 
