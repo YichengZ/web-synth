@@ -18,6 +18,6 @@ Python 3 must already be installed. No internet connection is required after thi
 Keyboard controls inside each synth:
 - Space: trigger sound
 - R: start or stop WAV recording
-- Escape: stop the PRISM sequencer or active TITAN voice
+- Escape: stop the PRISM sequencer, active TITAN voice, or CONVERGENCE scene
 
 All instruments request 96kHz processing. Recordings are stereo 24-bit WAV files and use the actual sample rate accepted by the browser. Recording automatically stops and downloads at the 5-minute safety limit.

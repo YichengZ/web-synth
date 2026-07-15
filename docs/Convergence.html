@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="A generative 96kHz fusion instrument combining TITAN, Kawaii, and PRISM through a shared mastering bus.">
+  <title>CONVERGENCE - Generative Fusion DSP</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%23070a0f'/%3E%3Ccircle cx='21' cy='32' r='12' fill='none' stroke='%23f97316' stroke-width='5'/%3E%3Ccircle cx='43' cy='32' r='12' fill='none' stroke='%2322d3ee' stroke-width='5'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: dark;
+      background: #070a0f;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      margin: 0;
+      background: #070a0f;
+      color: #f8fafc;
+    }
+
+    .convergence-range {
+      --progress: 50%;
+      --accent: #d8ff3e;
+      width: 100%;
+      height: 7px;
+      margin: 0;
+      -webkit-appearance: none;
+         -moz-appearance: none;
+              appearance: none;
+      border: 1px solid #394150;
+      border-radius: 999px;
+      background: linear-gradient(to right, var(--accent) 0 var(--progress), #1b222d var(--progress) 100%);
+      cursor: pointer;
+    }
+
+    .convergence-range::-webkit-slider-runnable-track {
+      height: 5px;
+      border-radius: 999px;
+      background: transparent;
+    }
+
+    .convergence-range::-webkit-slider-thumb {
+      width: 15px;
+      height: 15px;
+      margin-top: -5px;
+      -webkit-appearance: none;
+              appearance: none;
+      border: 3px solid var(--accent);
+      border-radius: 50%;
+      background: #f8fafc;
+      box-shadow: 0 0 0 2px #070a0f;
+    }
+
+    .convergence-range::-moz-range-track {
+      height: 5px;
+      border-radius: 999px;
+      background: #1b222d;
+    }
+
+    .convergence-range::-moz-range-progress {
+      height: 5px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .convergence-range::-moz-range-thumb {
+      width: 10px;
+      height: 10px;
+      border: 3px solid var(--accent);
+      border-radius: 50%;
+      background: #f8fafc;
+      box-shadow: 0 0 0 2px #070a0f;
+    }
+  </style>
+  <script type="module" crossorigin src="./assets/convergence-9_QL_ccD.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/jsx-runtime-PbhHeSYr.js">
+  <link rel="modulepreload" crossorigin href="./assets/styles-CY85E_rW.js">
+  <link rel="stylesheet" crossorigin href="./assets/styles-DTc6bLw6.css">
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>

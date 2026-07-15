@@ -14,6 +14,7 @@ export default defineConfig({
         prism: resolve(import.meta.dirname, "CrystalPrism.html"),
         kawaii: resolve(import.meta.dirname, "KawaiiSynth.html"),
         titan: resolve(import.meta.dirname, "TITAN_SUB.html"),
+        convergence: resolve(import.meta.dirname, "Convergence.html"),
       },
     },
   },

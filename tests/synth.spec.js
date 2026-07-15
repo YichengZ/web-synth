@@ -5,6 +5,7 @@ const synths = [
   { name: "PRISM", path: "/CrystalPrism.html" },
   { name: "Kawaii", path: "/KawaiiSynth.html" },
   { name: "TITAN", path: "/TITAN_SUB.html" },
+  { name: "CONVERGENCE", path: "/Convergence.html" },
 ];
 
 for (const synth of synths) {
@@ -75,6 +76,17 @@ test("Kawaii sliders keep visible progress and track contrast", async ({ page })
   expect(appearance.borderColor).toBe("rgb(51, 65, 85)");
 });
 
+test("CONVERGENCE switches between both master bus presets", async ({ page }) => {
+  await page.goto("/Convergence.html");
+  const multiband = page.getByRole("button", { name: "L3-STYLE" });
+  const inflator = page.getByRole("button", { name: "INFLATOR" });
+  await expect(multiband).toHaveAttribute("aria-pressed", "true");
+  await inflator.click();
+  await expect(inflator).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("Loud")).toBeVisible();
+  await expect(page.getByLabel("Tone")).toBeVisible();
+});
+
 test.describe("recording", () => {
   const recordingCases = [
     {
@@ -92,10 +104,27 @@ test.describe("recording", () => {
       recordName: "REC WAV",
       trigger: (page) => page.getByRole("button", { name: "TRIGGER", exact: true }).click(),
     },
+    {
+      name: "CONVERGENCE MULTIBAND",
+      path: "/Convergence.html",
+      recordName: "REC WAV",
+      trigger: (page) => page.getByRole("button", { name: "Generate convergence burst" }).click(),
+      expectStereo: true,
+    },
+    {
+      name: "CONVERGENCE INFLATOR",
+      path: "/Convergence.html",
+      recordName: "REC WAV",
+      trigger: async (page) => {
+        await page.getByRole("button", { name: "INFLATOR" }).click();
+        await page.getByRole("button", { name: "Generate convergence burst" }).click();
+      },
+      expectStereo: true,
+    },
   ];
 
   for (const recordingCase of recordingCases) {
-    test(`${recordingCase.path} exports a WAV`, async ({ page }, testInfo) => {
+    test(`${recordingCase.name || recordingCase.path} exports a WAV`, async ({ page }, testInfo) => {
       test.skip(testInfo.project.name === "mobile", "Recording export is covered once on desktop.");
       await page.addInitScript(() => {
         const NativeAudioContext = window.AudioContext;
@@ -131,6 +160,26 @@ test.describe("recording", () => {
       expect(bitDepth).toBe(24);
       expect(sampleRate).toBe(96_000);
       expect(duration).toBeGreaterThan(0.18);
+
+      let peak = 0;
+      for (let offset = 44; offset + 2 < wav.length; offset += 3) {
+        let sample = wav[offset] | (wav[offset + 1] << 8) | (wav[offset + 2] << 16);
+        if (sample & 0x800000) sample |= 0xff000000;
+        peak = Math.max(peak, Math.abs(sample / 0x800000));
+      }
+      expect(peak).toBeGreaterThan(0.001);
+
+      if (recordingCase.expectStereo) {
+        let stereoDifference = 0;
+        for (let offset = 44; offset + 5 < wav.length; offset += 6) {
+          let left = wav[offset] | (wav[offset + 1] << 8) | (wav[offset + 2] << 16);
+          let right = wav[offset + 3] | (wav[offset + 4] << 8) | (wav[offset + 5] << 16);
+          if (left & 0x800000) left |= 0xff000000;
+          if (right & 0x800000) right |= 0xff000000;
+          stereoDifference += Math.abs(left - right);
+        }
+        expect(stereoDifference).toBeGreaterThan(1000);
+      }
     });
   }
 });
