@@ -544,7 +544,17 @@ const { useState, useEffect, useRef, useCallback } = React;
                                             <span>MASTER VOL</span>
                                             <span className="text-white">{(volume * 100).toFixed(0)}%</span>
                                         </div>
-                                        <input aria-label="Master volume" type="range" min="0" max="1" step={0.01} value={volume} onChange={e => setVolume(parseFloat(e.target.value))} className="w-full h-1 bg-slate-800 accent-pink-500 rounded-full cursor-pointer" />
+                                        <input
+                                            aria-label="Master volume"
+                                            type="range"
+                                            min="0"
+                                            max="1"
+                                            step={0.01}
+                                            value={volume}
+                                            onChange={e => setVolume(parseFloat(e.target.value))}
+                                            style={getSliderStyle(volume, 0, 1, '#ec4899')}
+                                            className="kawaii-range w-full cursor-pointer"
+                                        />
                                     </div>
                                 </div>
                             </div>
@@ -654,6 +664,23 @@ const { useState, useEffect, useRef, useCallback } = React;
             </button>
         );
 
+        const sliderColors = {
+            'accent-pink-500': '#ec4899',
+            'accent-cyan-400': '#22d3ee',
+            'accent-slate-400': '#94a3b8',
+            'accent-purple-400': '#c084fc',
+            'accent-indigo-400': '#818cf8',
+        };
+
+        const getSliderStyle = (value, min, max, accent) => {
+            const numericValue = Number(value);
+            const progress = ((numericValue - min) / (max - min)) * 100;
+            return {
+                '--slider-accent': accent,
+                '--slider-progress': `${Math.min(100, Math.max(0, progress))}%`,
+            };
+        };
+
         const Knob = ({ label, value, min, max, step = 1, unit, color, onChange, locked, onToggleLock }) => (
             <div className="group">
                 <div className="flex justify-between items-end mb-1.5">
@@ -669,7 +696,8 @@ const { useState, useEffect, useRef, useCallback } = React;
                     aria-label={label}
                     onChange={e => onChange(e.target.value)}
                     disabled={locked}
-                    className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer transition-all bg-slate-800 ${locked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-700'} ${color}`}
+                    style={getSliderStyle(value || 0, min, max, sliderColors[color] || '#ec4899')}
+                    className={`kawaii-range w-full cursor-pointer transition-opacity ${locked ? 'cursor-not-allowed' : ''}`}
                 />
             </div>
         );

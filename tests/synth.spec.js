@@ -57,6 +57,24 @@ test("TITAN graph responds to touch pointer dragging", async ({ page }) => {
   await expect(point).not.toHaveAttribute("cy", before);
 });
 
+test("Kawaii sliders keep visible progress and track contrast", async ({ page }) => {
+  await page.goto("/KawaiiSynth.html");
+  const sliders = page.locator(".kawaii-range");
+  await expect(sliders).toHaveCount(11);
+
+  const appearance = await sliders.first().evaluate((slider) => {
+    const styles = getComputedStyle(slider);
+    return {
+      backgroundImage: styles.backgroundImage,
+      borderColor: styles.borderColor,
+    };
+  });
+
+  expect(appearance.backgroundImage).toContain("linear-gradient");
+  expect(appearance.backgroundImage).toContain("rgb(30, 41, 59)");
+  expect(appearance.borderColor).toBe("rgb(51, 65, 85)");
+});
+
 test.describe("recording", () => {
   const recordingCases = [
     {
