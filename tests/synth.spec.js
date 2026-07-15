@@ -1,0 +1,118 @@
+import { expect, test } from "@playwright/test";
+import { readFile, stat } from "node:fs/promises";
+
+const synths = [
+  { name: "PRISM", path: "/CrystalPrism.html" },
+  { name: "Kawaii", path: "/KawaiiSynth.html" },
+  { name: "TITAN", path: "/TITAN_SUB.html" },
+];
+
+for (const synth of synths) {
+  test(`${synth.name} loads without errors or horizontal overflow`, async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+
+    await page.goto(synth.path);
+    await expect(page.locator("main")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    expect(await page.locator('input[type="range"]:not([aria-label])').count()).toBe(0);
+    expect(errors).toEqual([]);
+  });
+}
+
+test("TITAN graph responds to touch pointer dragging", async ({ page }) => {
+  await page.goto("/TITAN_SUB.html");
+  const point = page.locator("svg circle").nth(1);
+  const box = await point.boundingBox();
+  const before = await point.getAttribute("cy");
+  expect(box).not.toBeNull();
+
+  await point.dispatchEvent("pointerdown", {
+    pointerId: 7,
+    pointerType: "touch",
+    clientX: box.x + box.width / 2,
+    clientY: box.y + box.height / 2,
+    bubbles: true,
+  });
+  await page.evaluate(({ x, y }) => {
+    window.dispatchEvent(new PointerEvent("pointermove", {
+      pointerId: 7,
+      pointerType: "touch",
+      clientX: x,
+      clientY: y,
+      bubbles: true,
+    }));
+    window.dispatchEvent(new PointerEvent("pointerup", {
+      pointerId: 7,
+      pointerType: "touch",
+      clientX: x,
+      clientY: y,
+      bubbles: true,
+    }));
+  }, { x: box.x + box.width / 2, y: box.y - 35 });
+
+  await expect(point).not.toHaveAttribute("cy", before);
+});
+
+test.describe("recording", () => {
+  const recordingCases = [
+    {
+      path: "/CrystalPrism.html",
+      recordName: "REC WAV",
+      trigger: (page) => page.getByRole("button", { name: "Hold to trigger PRISM sound" }).click(),
+    },
+    {
+      path: "/KawaiiSynth.html",
+      recordName: "REC WAV",
+      trigger: (page) => page.getByRole("button", { name: "Trigger Kawaii sound" }).click(),
+    },
+    {
+      path: "/TITAN_SUB.html",
+      recordName: "REC WAV",
+      trigger: (page) => page.getByRole("button", { name: "TRIGGER", exact: true }).click(),
+    },
+  ];
+
+  for (const recordingCase of recordingCases) {
+    test(`${recordingCase.path} exports a WAV`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name === "mobile", "Recording export is covered once on desktop.");
+      await page.addInitScript(() => {
+        const NativeAudioContext = window.AudioContext;
+        window.AudioContext = class TestAudioContext extends NativeAudioContext {
+          constructor(...args) {
+            super(...args);
+            window.__testAudioContext = this;
+          }
+        };
+      });
+      await page.goto(recordingCase.path);
+      await page.getByRole("button", { name: recordingCase.recordName, exact: true }).first().click();
+      const startTime = await page.evaluate(() => window.__testAudioContext.currentTime);
+      await recordingCase.trigger(page);
+      await page.waitForFunction(
+        (start) => window.__testAudioContext.currentTime - start >= 0.2,
+        startTime,
+        { timeout: 20_000 },
+      );
+
+      const downloadPromise = page.waitForEvent("download");
+      await page.getByRole("button", { name: /^STOP/ }).first().click();
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toMatch(/\.wav$/i);
+      const downloadPath = await download.path();
+      expect((await stat(downloadPath)).size).toBeGreaterThan(10_000);
+      const wav = await readFile(downloadPath);
+      const channels = wav.readUInt16LE(22);
+      const sampleRate = wav.readUInt32LE(24);
+      const bitDepth = wav.readUInt16LE(34);
+      const duration = (wav.length - 44) / (channels * (bitDepth / 8) * sampleRate);
+      expect(channels).toBe(2);
+      expect(bitDepth).toBe(24);
+      expect(sampleRate).toBe(96_000);
+      expect(duration).toBeGreaterThan(0.18);
+    });
+  }
+});
