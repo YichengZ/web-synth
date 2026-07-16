@@ -105,6 +105,31 @@ test("CONVERGENCE initializes tonal worklets at 96 kHz", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test("CONVERGENCE advances seeds and varies scene gestures", async ({ page }) => {
+  await page.goto("/Convergence.html");
+  const burst = page.getByRole("button", { name: "Generate convergence burst" });
+  const stop = page.getByRole("button", { name: "Stop all convergence voices" });
+  const seed = page.getByLabel("Scene seed");
+  const gesture = page.getByText(/^T:/);
+  const seenGestures = new Set();
+  const seenTriggerCounts = new Set();
+  let previousSeed = await seed.inputValue();
+
+  for (let index = 0; index < 4; index += 1) {
+    await burst.click();
+    await expect(seed).not.toHaveValue(previousSeed);
+    await expect(gesture).toHaveText(/^T:(DROP|RISE|PULSE|BOUNCE|GLIDE) \/ K:(PLUCK|STAB|CHORD|BEND|PULSE) \/ P:(SHARD|RIBBON|SWELL|CASCADE|PULSE)$/);
+    const mode = await page.getByText(/^BURST X[1-4]$/).textContent();
+    seenGestures.add(await gesture.textContent());
+    seenTriggerCounts.add(mode);
+    previousSeed = await seed.inputValue();
+    await stop.click();
+  }
+
+  expect(seenGestures.size).toBeGreaterThan(1);
+  expect(seenTriggerCounts.size).toBeGreaterThan(1);
+});
+
 test.describe("recording", () => {
   const recordingCases = [
     {

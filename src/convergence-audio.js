@@ -11,6 +11,9 @@ const SCALES = {
 const MATERIALS = ["GLASS", "RUBBER", "PLASMA", "ALLOY"];
 const SCALE_NAMES = Object.keys(SCALES);
 const CROSSOVERS = [90, 360, 1800, 6500];
+const TITAN_GESTURES = ["DROP", "RISE", "PULSE", "BOUNCE", "GLIDE"];
+const KAWAII_GESTURES = ["PLUCK", "STAB", "CHORD", "BEND", "PULSE"];
+const PRISM_GESTURES = ["SHARD", "RIBBON", "SWELL", "CASCADE", "PULSE"];
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const dbToGain = (db) => 10 ** (db / 20);
@@ -36,6 +39,8 @@ const createRandom = (seed) => {
     return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
   };
 };
+
+const pickRandom = (rng, values) => values[Math.floor(rng() * values.length)];
 
 const createInflatorCurve = (curveValue = 8, effectValue = 38, clip = false) => {
   const length = 65536;
@@ -537,7 +542,44 @@ const createSceneDna = (seed, settings) => {
   const material = MATERIALS[Math.floor(rng() * MATERIALS.length)];
   const density = clamp(settings.density, 0, 1);
   const energy = clamp(settings.energy, 0, 1);
-  const duration = 3.2 + density * 3.8 + rng() * 1.4;
+  const affinity = clamp(settings.affinity, 0, 1);
+  const motion = clamp(settings.motion, 0, 1);
+  const triggerCount = 1 + Math.floor(rng() * (1 + density * 3));
+  const triggers = [];
+  let offset = 0;
+
+  for (let index = 0; index < triggerCount; index += 1) {
+    if (index > 0) offset += 0.2 + rng() * (0.36 + motion * 0.58);
+    const rawMix = [0.42 + rng() * 1.08, 0.42 + rng() * 1.08, 0.42 + rng() * 1.08];
+    const dominant = Math.floor(rng() * rawMix.length);
+    rawMix[dominant] *= 1.18 + rng() * 0.42;
+    const mixPeak = Math.max(...rawMix);
+    const normalizedMix = rawMix.map((value) => clamp(
+      (value / mixPeak) * (0.94 + energy * 0.22),
+      0.28,
+      1.18,
+    ));
+
+    triggers.push({
+      offset,
+      titanGesture: pickRandom(rng, TITAN_GESTURES),
+      kawaiiGesture: pickRandom(rng, KAWAII_GESTURES),
+      prismGesture: pickRandom(rng, PRISM_GESTURES),
+      titanDegree: pickRandom(rng, [0, 0, 0, -1, 1, 2]),
+      timing: {
+        titan: rng() * 0.08,
+        kawaii: 0.025 + rng() * 0.14,
+        prism: 0.07 + rng() * 0.24,
+      },
+      mix: {
+        titan: normalizedMix[0],
+        kawaii: normalizedMix[1],
+        prism: normalizedMix[2],
+      },
+    });
+  }
+
+  const duration = offset + 3.4 + density * 3.2 + rng() * 1.2;
   return {
     seed: hashSeed(seed),
     rng,
@@ -548,10 +590,11 @@ const createSceneDna = (seed, settings) => {
     material,
     density,
     energy,
-    affinity: clamp(settings.affinity, 0, 1),
-    motion: clamp(settings.motion, 0, 1),
+    affinity,
+    motion,
     space: clamp(settings.space, 0, 1),
     tension: clamp(settings.tension, 0, 1),
+    triggers,
     duration,
   };
 };
@@ -563,11 +606,62 @@ const pickScaleMidi = (dna, degreeIndex, octave = 0) => {
   return dna.rootMidi + dna.scale[wrapped] + octaveOffset + octave * 12;
 };
 
-const spawnTitan = (engine, dna, time) => {
+const schedulePulseEnvelope = (gain, time, peak, duration, pulseCount) => {
+  const step = duration / pulseCount;
+  gain.cancelScheduledValues(time);
+  for (let index = 0; index < pulseCount; index += 1) {
+    const pulseTime = time + index * step;
+    gain.setValueAtTime(0.0001, pulseTime);
+    gain.exponentialRampToValueAtTime(Math.max(0.0002, peak * (1 - index * 0.07)), pulseTime + 0.012);
+    gain.exponentialRampToValueAtTime(0.0001, pulseTime + step * 0.68);
+  }
+  gain.setValueAtTime(0.0001, time + duration + 0.04);
+};
+
+const scheduleTitanPitch = (frequency, base, time, duration, gesture, dna, glideRatio = 1) => {
+  frequency.cancelScheduledValues(time);
+  if (gesture === "RISE") {
+    frequency.setValueAtTime(base * (0.68 + dna.tension * 0.12), time);
+    frequency.exponentialRampToValueAtTime(base * (1.08 + dna.motion * 0.12), time + duration * 0.68);
+    frequency.exponentialRampToValueAtTime(base, time + duration * 0.94);
+  } else if (gesture === "PULSE") {
+    frequency.setValueAtTime(base, time);
+    frequency.exponentialRampToValueAtTime(base * 1.08, time + duration * 0.17);
+    frequency.exponentialRampToValueAtTime(base * 0.94, time + duration * 0.34);
+    frequency.exponentialRampToValueAtTime(base * 1.04, time + duration * 0.52);
+    frequency.exponentialRampToValueAtTime(base, time + duration * 0.72);
+  } else if (gesture === "BOUNCE") {
+    frequency.setValueAtTime(base * 1.08, time);
+    frequency.exponentialRampToValueAtTime(base * 0.82, time + duration * 0.24);
+    frequency.exponentialRampToValueAtTime(base * 1.16, time + duration * 0.48);
+    frequency.exponentialRampToValueAtTime(base * 0.93, time + duration * 0.68);
+    frequency.exponentialRampToValueAtTime(base, time + duration * 0.86);
+  } else if (gesture === "GLIDE") {
+    frequency.setValueAtTime(base * (dna.contour > 0 ? 0.88 : 1.12), time);
+    frequency.exponentialRampToValueAtTime(base * glideRatio, time + duration * 0.78);
+  } else {
+    frequency.setValueAtTime(base * (1.18 + dna.tension * 0.34), time);
+    frequency.exponentialRampToValueAtTime(base * 0.985, time + 0.24 + dna.energy * 0.28);
+    frequency.exponentialRampToValueAtTime(base, time + duration * 0.72);
+  }
+};
+
+const spawnTitan = (engine, dna, time, trigger) => {
   const { ctx, stems } = engine;
   const rng = dna.rng;
-  const baseFrequency = midiToFrequency(dna.rootMidi - 12);
-  const duration = 1.7 + dna.energy * 1.8 + rng() * 0.55;
+  const gesture = trigger.titanGesture;
+  const baseFrequency = midiToFrequency(pickScaleMidi(dna, trigger.titanDegree, -1));
+  const durationBase = {
+    DROP: 1.75,
+    RISE: 2.25,
+    PULSE: 1.45,
+    BOUNCE: 1.65,
+    GLIDE: 2.05,
+  }[gesture];
+  const duration = durationBase + dna.energy * 1.15 + rng() * 0.48;
+  const accent = trigger.mix.titan * (0.78 + rng() * 0.34);
+  const glideDegree = 1 + Math.floor(rng() * Math.min(3, dna.scale.length - 1));
+  const glideRatio = 2 ** ((dna.contour * dna.scale[glideDegree]) / 12);
   const fundamental = ctx.createOscillator();
   const bodyLeft = ctx.createOscillator();
   const bodyRight = ctx.createOscillator();
@@ -586,33 +680,44 @@ const spawnTitan = (engine, dna, time) => {
   const bodyFilter = createFilter(ctx, "lowpass", 430 + dna.energy * 520, 0.8 + dna.tension * 2.5);
   const bodyColor = ctx.createWaveShaper();
   const impactFilter = createFilter(ctx, "bandpass", baseFrequency * 4.2, 1.2 + dna.tension * 2);
-  const dropStart = baseFrequency * (1.22 + dna.tension * 0.38);
-  const settleTime = time + 0.28 + dna.energy * 0.32;
+  const pulseCount = gesture === "PULSE" ? 4 + Math.floor(dna.density * 3) : 3;
 
   fundamental.type = "sine";
-  bodyLeft.type = dna.material === "RUBBER" ? "triangle" : "sine";
-  bodyRight.type = dna.material === "PLASMA" ? "sawtooth" : "triangle";
-  upper.type = dna.material === "GLASS" ? "sine" : "triangle";
+  bodyLeft.type = gesture === "PULSE" ? "square" : dna.material === "RUBBER" ? "triangle" : "sine";
+  bodyRight.type = gesture === "RISE" || dna.material === "PLASMA" ? "sawtooth" : "triangle";
+  upper.type = gesture === "BOUNCE" ? "square" : dna.material === "GLASS" ? "sine" : "triangle";
   pitchedImpact.type = "sine";
   modulator.type = "sine";
-  fundamental.frequency.setValueAtTime(dropStart, time);
-  fundamental.frequency.exponentialRampToValueAtTime(baseFrequency * 0.985, settleTime);
-  fundamental.frequency.exponentialRampToValueAtTime(baseFrequency, time + duration * 0.72);
-  bodyLeft.frequency.setValueAtTime(baseFrequency * 2.12, time);
-  bodyLeft.frequency.exponentialRampToValueAtTime(baseFrequency * 2.002, settleTime + 0.08);
-  bodyRight.frequency.setValueAtTime(baseFrequency * 2.16, time);
-  bodyRight.frequency.exponentialRampToValueAtTime(baseFrequency * 1.998, settleTime + 0.11);
-  upper.frequency.setValueAtTime(baseFrequency * (3.02 + dna.tension * 0.15), time);
-  upper.frequency.exponentialRampToValueAtTime(baseFrequency * 3.001, time + duration * 0.62);
-  pitchedImpact.frequency.setValueAtTime(baseFrequency * (6.5 + dna.tension * 1.8), time);
-  pitchedImpact.frequency.exponentialRampToValueAtTime(baseFrequency * 2.4, time + 0.13);
-  modulator.frequency.value = baseFrequency * (0.48 + dna.motion * 0.34);
-  modulatorGain.gain.value = 2.5 + dna.tension * 10;
-  scheduleEnvelope(fundamentalGain.gain, time, 0.006, 0.25 + dna.energy * 0.13, duration);
-  scheduleEnvelope(bodyLeftGain.gain, time, 0.005, 0.062 + dna.energy * 0.035, duration * 0.84);
-  scheduleEnvelope(bodyRightGain.gain, time, 0.007, 0.052 + dna.tension * 0.032, duration * 0.78);
-  scheduleEnvelope(upperGain.gain, time, 0.004, 0.026 + dna.energy * 0.024, duration * 0.62);
-  scheduleEnvelope(impactGain.gain, time, 0.0015, 0.085 + dna.energy * 0.06, 0.15);
+  scheduleTitanPitch(fundamental.frequency, baseFrequency, time, duration, gesture, dna, glideRatio);
+  scheduleTitanPitch(bodyLeft.frequency, baseFrequency * 2.002, time, duration, gesture, dna, glideRatio);
+  scheduleTitanPitch(bodyRight.frequency, baseFrequency * 1.998, time, duration, gesture, dna, glideRatio);
+  scheduleTitanPitch(upper.frequency, baseFrequency * 3.001, time, duration, gesture, dna, glideRatio);
+  if (gesture === "RISE") {
+    pitchedImpact.frequency.setValueAtTime(baseFrequency * 1.7, time);
+    pitchedImpact.frequency.exponentialRampToValueAtTime(baseFrequency * 5.2, time + 0.18);
+  } else if (gesture === "BOUNCE") {
+    pitchedImpact.frequency.setValueAtTime(baseFrequency * 3.2, time);
+    pitchedImpact.frequency.exponentialRampToValueAtTime(baseFrequency * 5.5, time + 0.07);
+    pitchedImpact.frequency.exponentialRampToValueAtTime(baseFrequency * 2.6, time + 0.18);
+  } else {
+    pitchedImpact.frequency.setValueAtTime(baseFrequency * (5.2 + dna.tension * 1.8), time);
+    pitchedImpact.frequency.exponentialRampToValueAtTime(baseFrequency * 2.4, time + 0.15);
+  }
+  modulator.frequency.value = baseFrequency * (gesture === "PULSE" ? 1.5 : 0.48 + dna.motion * 0.34);
+  modulatorGain.gain.value = 2.5 + dna.tension * 10 + (gesture === "RISE" ? 8 : 0);
+  const attack = gesture === "RISE" ? 0.13 : gesture === "GLIDE" ? 0.045 : 0.006;
+  if (gesture === "PULSE" || gesture === "BOUNCE") {
+    schedulePulseEnvelope(fundamentalGain.gain, time, (0.22 + dna.energy * 0.11) * accent, duration, pulseCount);
+    schedulePulseEnvelope(bodyLeftGain.gain, time, (0.055 + dna.energy * 0.03) * accent, duration * 0.88, pulseCount);
+    schedulePulseEnvelope(bodyRightGain.gain, time, (0.047 + dna.tension * 0.028) * accent, duration * 0.84, pulseCount);
+    schedulePulseEnvelope(upperGain.gain, time, (0.021 + dna.energy * 0.019) * accent, duration * 0.72, pulseCount);
+  } else {
+    scheduleEnvelope(fundamentalGain.gain, time, attack, (0.23 + dna.energy * 0.12) * accent, duration);
+    scheduleEnvelope(bodyLeftGain.gain, time, attack * 0.8, (0.06 + dna.energy * 0.032) * accent, duration * 0.86);
+    scheduleEnvelope(bodyRightGain.gain, time, attack, (0.05 + dna.tension * 0.03) * accent, duration * 0.8);
+    scheduleEnvelope(upperGain.gain, time, attack * 0.7, (0.024 + dna.energy * 0.021) * accent, duration * 0.64);
+  }
+  scheduleEnvelope(impactGain.gain, time, gesture === "RISE" ? 0.025 : 0.0015, (0.07 + dna.energy * 0.05) * accent, 0.18);
   bodyLeftPan.pan.value = -0.18 - dna.motion * 0.08;
   bodyRightPan.pan.value = 0.18 + dna.motion * 0.08;
   bodyColor.curve = createSaturationCurve(2.1, -0.035, 0.54);
@@ -652,26 +757,43 @@ const spawnTitan = (engine, dna, time) => {
   engine.registerSource(pitchedImpact, time + 0.22);
   scheduleDuck(stems.kawaii.duck.gain, time, 0.76, 0.22 + dna.energy * 0.18);
   scheduleDuck(stems.prism.duck.gain, time, 0.68, 0.28 + dna.energy * 0.22);
-  engine.signalVoice("titan", time, dna.energy);
-  return { baseFrequency, duration };
+  engine.signalVoice("titan", time, clamp(dna.energy * trigger.mix.titan, 0, 1));
+  return { baseFrequency, duration, gesture };
 };
 
-const spawnKawaii = (engine, dna, time, titan) => {
+const spawnKawaii = (engine, dna, time, titan, trigger) => {
   const { ctx, stems } = engine;
   const rng = dna.rng;
-  const count = 3 + Math.floor(dna.density * 7);
+  const gesture = trigger.kawaiiGesture;
+  const gestureSettings = {
+    PLUCK: { baseCount: 3, extraCount: 5, spacing: 0.13, duration: 0.16, durationRange: 0.36, attack: 0.005, peak: 0.055 },
+    STAB: { baseCount: 2, extraCount: 3, spacing: 0.095, duration: 0.13, durationRange: 0.2, attack: 0.003, peak: 0.048 },
+    CHORD: { baseCount: 3, extraCount: 4, spacing: 0.018, duration: 0.42, durationRange: 0.5, attack: 0.025, peak: 0.038 },
+    BEND: { baseCount: 2, extraCount: 4, spacing: 0.24, duration: 0.52, durationRange: 0.72, attack: 0.018, peak: 0.044 },
+    PULSE: { baseCount: 3, extraCount: 4, spacing: 0.17, duration: 0.12, durationRange: 0.18, attack: 0.003, peak: 0.042 },
+  }[gesture];
+  const count = gestureSettings.baseCount + Math.floor(dna.density * gestureSettings.extraCount);
   const notes = [];
   let previousDegree = dna.contour > 0 ? 0 : dna.scale.length - 1;
 
   for (let index = 0; index < count; index += 1) {
-    const inheritedStep = dna.contour * (index % 2 === 0 ? 1 : 2);
-    const mutation = rng() > dna.affinity ? Math.floor(rng() * 5) - 2 : 0;
-    const degree = previousDegree + inheritedStep + mutation;
+    const inheritedStep = gesture === "CHORD"
+      ? [0, 2, 4][index % 3] + Math.floor(index / 3) * dna.contour
+      : dna.contour * (index % 2 === 0 ? 1 : 2);
+    const mutationRange = gesture === "STAB" || gesture === "PULSE" ? 3 : 5;
+    const mutation = rng() > dna.affinity ? Math.floor(rng() * mutationRange) - Math.floor(mutationRange / 2) : 0;
+    const degree = gesture === "CHORD" ? inheritedStep + mutation : previousDegree + inheritedStep + mutation;
     previousDegree = degree;
-    const midi = pickScaleMidi(dna, degree, 1 + (index % 3 === 2 ? 1 : 0));
+    const octave = gesture === "STAB" || gesture === "PULSE"
+      ? (index % 4 === 3 ? 1 : 0)
+      : gesture === "PLUCK" ? 1 + (index % 4 === 3 ? 1 : 0) : 1;
+    const midi = pickScaleMidi(dna, degree, octave);
     const frequency = midiToFrequency(midi);
-    const onset = time + 0.07 + index * (0.11 + (1 - dna.motion) * 0.1) + rng() * 0.055;
-    const duration = 0.18 + rng() * (0.32 + dna.space * 0.34);
+    const chordGroupDelay = gesture === "CHORD" ? Math.floor(index / 3) * 0.22 : 0;
+    const onset = time + 0.045 + chordGroupDelay
+      + (gesture === "CHORD" ? index % 3 : index) * gestureSettings.spacing
+      + rng() * (gesture === "CHORD" ? 0.012 : 0.045);
+    const duration = gestureSettings.duration + rng() * (gestureSettings.durationRange + dna.space * 0.24);
     const oscillator = ctx.createOscillator();
     const harmonic = ctx.createOscillator();
     const fm = ctx.createOscillator();
@@ -679,24 +801,55 @@ const spawnKawaii = (engine, dna, time, titan) => {
     const oscillatorGain = ctx.createGain();
     const harmonicGain = ctx.createGain();
     const voiceSum = ctx.createGain();
-    const filter = createFilter(ctx, "lowpass", 1900 + dna.energy * 5600 + rng() * 1800, 1.6 + dna.tension * 6);
+    const cutoffBase = {
+      PLUCK: 2200,
+      STAB: 850,
+      CHORD: 1700,
+      BEND: 1350,
+      PULSE: 680,
+    }[gesture];
+    const cutoffRange = {
+      PLUCK: 6200,
+      STAB: 3600,
+      CHORD: 4300,
+      BEND: 5200,
+      PULSE: 2600,
+    }[gesture];
+    const filter = createFilter(
+      ctx,
+      "lowpass",
+      cutoffBase + dna.energy * cutoffRange + rng() * 900,
+      gesture === "STAB" || gesture === "PULSE" ? 0.85 + dna.tension * 2.4 : 1.5 + dna.tension * 5,
+    );
     const envelope = ctx.createGain();
     const panner = ctx.createStereoPanner();
-    const targetRatio = 2 ** ((dna.contour * (1 + dna.tension * 4)) / 12);
-    const harmonicRatio = index % 3 === 0 ? 1.5 : 2;
+    const bendSemitones = gesture === "BEND"
+      ? dna.contour * (3 + Math.floor(rng() * 5))
+      : gesture === "PULSE" ? (index % 2 ? -2 : 2) : dna.contour * (0.5 + dna.tension * 2.5);
+    const targetRatio = 2 ** (bendSemitones / 12);
+    const harmonicRatio = gesture === "CHORD" ? 1.5 : gesture === "STAB" ? 2 : index % 3 === 0 ? 1.5 : 2;
 
-    oscillator.type = dna.material === "GLASS" ? "sine" : index % 2 ? "triangle" : "sine";
-    harmonic.type = index % 4 === 0 ? "triangle" : "sine";
+    oscillator.type = gesture === "STAB"
+      ? (index % 2 ? "triangle" : "sawtooth")
+      : gesture === "PULSE" ? "square"
+        : gesture === "BEND" ? (index % 2 ? "triangle" : "sawtooth")
+          : gesture === "CHORD" ? "triangle"
+            : dna.material === "GLASS" ? "sine" : index % 2 ? "triangle" : "sine";
+    harmonic.type = gesture === "STAB" ? "triangle" : index % 4 === 0 ? "triangle" : "sine";
     oscillator.frequency.setValueAtTime(frequency, onset);
     oscillator.frequency.exponentialRampToValueAtTime(frequency * targetRatio, onset + duration * 0.72);
     harmonic.frequency.setValueAtTime(frequency * harmonicRatio, onset);
     harmonic.frequency.exponentialRampToValueAtTime(frequency * harmonicRatio * targetRatio, onset + duration * 0.72);
     fm.frequency.value = titan.baseFrequency * [0.5, 1, 1.5, 2][index % 4] * (0.98 + rng() * 0.04);
-    fmGain.gain.setValueAtTime(4 + dna.tension * 62 + dna.motion * 22, onset);
+    const fmDepth = gesture === "STAB" || gesture === "PULSE"
+      ? 2 + dna.tension * 22
+      : 4 + dna.tension * 58 + dna.motion * 20;
+    fmGain.gain.setValueAtTime(fmDepth, onset);
     fmGain.gain.exponentialRampToValueAtTime(0.01, onset + duration);
-    oscillatorGain.gain.value = 0.72;
-    harmonicGain.gain.value = 0.16 + dna.tension * 0.12;
-    scheduleEnvelope(envelope.gain, onset, 0.006, 0.058 + dna.energy * 0.044, duration);
+    oscillatorGain.gain.value = gesture === "CHORD" ? 0.64 : 0.72;
+    harmonicGain.gain.value = gesture === "STAB" ? 0.07 : 0.12 + dna.tension * 0.1;
+    const voicePeak = (gestureSettings.peak + dna.energy * 0.034) * trigger.mix.kawaii;
+    scheduleEnvelope(envelope.gain, onset, gestureSettings.attack, voicePeak, duration);
     panner.pan.value = clamp((index / Math.max(1, count - 1)) * 1.4 - 0.7 + (rng() - 0.5) * 0.3, -1, 1);
     fm.connect(fmGain);
     fmGain.connect(oscillator.frequency);
@@ -716,67 +869,126 @@ const spawnKawaii = (engine, dna, time, titan) => {
     engine.registerSource(oscillator, onset + duration + 0.1);
     engine.registerSource(harmonic, onset + duration + 0.1);
     notes.push({ frequency, onset, duration, degree });
-    engine.signalVoice("kawaii", onset, dna.energy * 0.82);
+    engine.signalVoice("kawaii", onset, clamp(dna.energy * trigger.mix.kawaii * 0.88, 0, 1));
   }
 
   return notes;
 };
 
-const spawnPrism = (engine, dna, time, motif) => {
+const spawnPrism = (engine, dna, time, motif, trigger) => {
   const { ctx, stems } = engine;
   const rng = dna.rng;
-  const count = 6 + Math.floor(dna.density * 12);
+  const gesture = trigger.prismGesture;
+  const gestureSettings = {
+    SHARD: { baseCount: 4, extraCount: 7, duration: 0.12, durationRange: 0.42, attack: 0.006, peak: 0.021 },
+    RIBBON: { baseCount: 2, extraCount: 4, duration: 0.72, durationRange: 1.15, attack: 0.055, peak: 0.019 },
+    SWELL: { baseCount: 2, extraCount: 3, duration: 1.15, durationRange: 1.65, attack: 0.2, peak: 0.017 },
+    CASCADE: { baseCount: 4, extraCount: 7, duration: 0.2, durationRange: 0.62, attack: 0.012, peak: 0.018 },
+    PULSE: { baseCount: 4, extraCount: 5, duration: 0.11, durationRange: 0.22, attack: 0.003, peak: 0.017 },
+  }[gesture];
+  const count = gestureSettings.baseCount + Math.floor(dna.density * gestureSettings.extraCount);
   const sourceNotes = motif.length ? motif : [{ frequency: midiToFrequency(dna.rootMidi + 24), onset: time }];
+  const relationMap = {
+    SHARD: [1.5, 2, 2.5, 3, 4, 5],
+    RIBBON: [0.75, 1, 1.5, 2, 3],
+    SWELL: [0.5, 0.75, 1, 1.5, 2],
+    CASCADE: [1, 1.5, 2, 2.5, 3],
+    PULSE: [0.5, 1, 1.5, 2],
+  }[gesture];
+  const frequencyRange = {
+    SHARD: [700, 18000],
+    RIBBON: [320, 9500],
+    SWELL: [280, 7200],
+    CASCADE: [480, 14000],
+    PULSE: [350, 6200],
+  }[gesture];
 
   for (let index = 0; index < count; index += 1) {
     const parent = sourceNotes[index % sourceNotes.length];
-    const relation = [1.5, 2, 2.5, 3, 4, 5][(index + Math.floor(rng() * 3)) % 6];
-    const frequency = clamp(parent.frequency * relation * (1 + (rng() - 0.5) * (1 - dna.affinity) * 0.055), 480, 18000);
-    const onset = Math.max(time + 0.18, parent.onset + 0.12 + rng() * (0.5 + dna.space * 1.3));
-    const duration = 0.2 + rng() * (0.5 + dna.space * 1.25);
+    const relation = relationMap[(index + Math.floor(rng() * 3)) % relationMap.length];
+    const frequency = clamp(
+      parent.frequency * relation * (1 + (rng() - 0.5) * (1 - dna.affinity) * 0.055),
+      frequencyRange[0],
+      frequencyRange[1],
+    );
+    const onset = gesture === "SHARD"
+      ? Math.max(time + 0.12, parent.onset + 0.06 + rng() * (0.42 + dna.space * 0.8))
+      : gesture === "SWELL" ? time + 0.12 + index * 0.08 + rng() * 0.32
+        : gesture === "RIBBON" ? time + 0.08 + index * 0.13 + rng() * 0.09
+          : gesture === "CASCADE" ? time + 0.08 + index * (0.07 + (1 - dna.motion) * 0.09) + rng() * 0.035
+            : time + 0.07 + index * 0.14 + rng() * 0.025;
+    const duration = gestureSettings.duration + rng() * (gestureSettings.durationRange + dna.space * 0.28);
     const oscillator = ctx.createOscillator();
     const envelope = ctx.createGain();
     const panner = ctx.createStereoPanner();
-    const highpass = createFilter(ctx, "highpass", Math.min(6000, frequency * 0.45), 0.7);
+    const filterType = gesture === "SHARD" ? "highpass" : gesture === "CASCADE" ? "bandpass" : "lowpass";
+    const filterFrequency = gesture === "SHARD"
+      ? Math.min(6000, frequency * 0.42)
+      : gesture === "CASCADE" ? frequency
+        : Math.min(12000, Math.max(850, frequency * (gesture === "PULSE" ? 1.35 : 2.2)));
+    const filter = createFilter(ctx, filterType, filterFrequency, gesture === "CASCADE" ? 1.4 + dna.tension * 3 : 0.75);
+    const glideSemitones = gesture === "RIBBON"
+      ? dna.contour * (4 + Math.floor(rng() * 6))
+      : gesture === "CASCADE" ? (index % 2 ? -4 : 5) : gesture === "SWELL" ? dna.contour * 1.5 : 0;
+    const targetRatio = 2 ** (glideSemitones / 12);
 
-    oscillator.type = index % 5 === 0 ? "triangle" : "sine";
+    oscillator.type = gesture === "RIBBON"
+      ? (index % 2 ? "triangle" : "sawtooth")
+      : gesture === "SWELL" ? (index % 2 ? "sine" : "triangle")
+        : gesture === "PULSE" ? "square"
+          : gesture === "CASCADE" ? (index % 3 ? "triangle" : "sawtooth")
+            : index % 5 === 0 ? "triangle" : "sine";
     oscillator.frequency.setValueAtTime(frequency, onset);
+    if (targetRatio !== 1) oscillator.frequency.exponentialRampToValueAtTime(frequency * targetRatio, onset + duration * 0.78);
     oscillator.detune.setValueAtTime((rng() - 0.5) * (8 + dna.motion * 34), onset);
     oscillator.detune.linearRampToValueAtTime((rng() - 0.5) * 60 * dna.motion, onset + duration);
-    scheduleEnvelope(envelope.gain, onset, 0.008 + rng() * 0.03, 0.018 + dna.energy * 0.022, duration);
+    const voicePeak = (gestureSettings.peak + dna.energy * 0.018) * trigger.mix.prism;
+    scheduleEnvelope(envelope.gain, onset, gestureSettings.attack + rng() * gestureSettings.attack * 0.35, voicePeak, duration);
     panner.pan.value = clamp((rng() * 2 - 1) * (0.45 + dna.motion * 0.5), -1, 1);
-    oscillator.connect(highpass);
-    highpass.connect(envelope);
+    oscillator.connect(filter);
+    filter.connect(envelope);
     envelope.connect(panner);
     panner.connect(stems.prism.input);
     oscillator.start(onset);
     engine.registerSource(oscillator, onset + duration + 0.2);
-    engine.signalVoice("prism", onset, dna.energy * 0.65);
+    engine.signalVoice("prism", onset, clamp(dna.energy * trigger.mix.prism * 0.72, 0, 1));
   }
 
-  if (dna.space > 0.34) {
-    const bloomCount = 3 + Math.floor(dna.density * 3);
+  if (dna.space > 0.34 && (gesture === "RIBBON" || gesture === "SWELL")) {
+    const bloomCount = 2 + Math.floor(dna.density * 2);
     for (let index = 0; index < bloomCount; index += 1) {
       const parent = sourceNotes[index % sourceNotes.length];
       const oscillator = ctx.createOscillator();
       const envelope = ctx.createGain();
       const panner = ctx.createStereoPanner();
-      const onset = time + 0.3 + index * 0.075 + rng() * 0.18;
-      const duration = 0.9 + dna.space * 2 + rng() * 0.45;
-      const ratio = [2, 3, 4, 5, 6][index % 5];
-      const frequency = clamp(parent.frequency * ratio, 1200, 17500);
-      oscillator.type = index % 3 === 0 ? "triangle" : "sine";
+      const bloomFilter = createFilter(ctx, "lowpass", 4200 + dna.energy * 4200, 0.7);
+      const onset = time + 0.24 + index * 0.12 + rng() * 0.16;
+      const duration = 1 + dna.space * 1.8 + rng() * 0.48;
+      const ratio = [1, 1.5, 2, 3][index % 4];
+      const frequency = clamp(parent.frequency * ratio, 520, 9800);
+      oscillator.type = index % 2 ? "triangle" : "sawtooth";
       oscillator.frequency.setValueAtTime(frequency, onset);
       oscillator.detune.setValueAtTime((index - bloomCount / 2) * (2 + dna.motion * 5), onset);
       oscillator.detune.linearRampToValueAtTime((rng() - 0.5) * 22 * dna.motion, onset + duration);
-      scheduleEnvelope(envelope.gain, onset, 0.1 + rng() * 0.14, 0.009 + dna.energy * 0.012, duration);
+      oscillator.frequency.exponentialRampToValueAtTime(
+        frequency * 2 ** ((dna.contour * (2 + index)) / 12),
+        onset + duration * 0.82,
+      );
+      scheduleEnvelope(
+        envelope.gain,
+        onset,
+        0.12 + rng() * 0.18,
+        (0.007 + dna.energy * 0.009) * trigger.mix.prism,
+        duration,
+      );
       panner.pan.value = clamp((index / Math.max(1, bloomCount - 1)) * 1.6 - 0.8, -1, 1);
-      oscillator.connect(envelope);
+      oscillator.connect(bloomFilter);
+      bloomFilter.connect(envelope);
       envelope.connect(panner);
       panner.connect(stems.prism.input);
       oscillator.start(onset);
       engine.registerSource(oscillator, onset + duration + 0.1);
-      engine.signalVoice("prism", onset, dna.energy * 0.48);
+      engine.signalVoice("prism", onset, clamp(dna.energy * trigger.mix.prism * 0.52, 0, 1));
     }
   }
 };
@@ -944,15 +1156,23 @@ export class ConvergenceEngine {
 
   scheduleScene(settings, seed, startTime = this.ctx.currentTime + 0.035) {
     const dna = createSceneDna(seed, settings);
-    const titan = spawnTitan(this, dna, startTime);
-    const motif = spawnKawaii(this, dna, startTime, titan);
-    spawnPrism(this, dna, startTime, motif);
+    dna.triggers.forEach((trigger) => {
+      const triggerTime = startTime + trigger.offset;
+      const titan = spawnTitan(this, dna, triggerTime + trigger.timing.titan, trigger);
+      const motif = spawnKawaii(this, dna, triggerTime + trigger.timing.kawaii, titan, trigger);
+      spawnPrism(this, dna, triggerTime + trigger.timing.prism, motif, trigger);
+    });
+    const primaryTrigger = dna.triggers[0];
     this.onScene?.({
       seed: dna.seed,
       scale: dna.scaleName,
       material: dna.material,
       root: dna.rootMidi,
       duration: dna.duration,
+      triggerCount: dna.triggers.length,
+      titanGesture: primaryTrigger.titanGesture,
+      kawaiiGesture: primaryTrigger.kawaiiGesture,
+      prismGesture: primaryTrigger.prismGesture,
     });
     return dna;
   }

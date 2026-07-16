@@ -17,6 +17,8 @@ Every line of DSP (Digital Signal Processing) code and UI logic in this project 
 - **Concept:** Related low, mid, and high-frequency voices generated from one scene seed.
 - **Features:**
   - BURST and evolving DRIFT playback
+  - Seed-advancing scenes with 1-4 irregular sub-triggers and randomized stem emphasis
+  - Bass drop, rise, pulse, bounce, and glide gestures plus varied stab, chord, ribbon, swell, and cascade voices
   - Pitch-related harmonic voices instead of noise-based source layers
   - Per-stem oversampled color drive followed by real-time STFT tonal denoising
   - L3-style and RC Inflator presets plus a default BRUTAL serial bus

@@ -79,7 +79,16 @@ const Convergence = () => {
   const [ready, setReady] = useState(false);
   const [drifting, setDrifting] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [scene, setScene] = useState({ seed, scale: "DORIAN", material: "GLASS", root: 45 });
+  const [scene, setScene] = useState({
+    seed,
+    scale: "DORIAN",
+    material: "GLASS",
+    root: 45,
+    triggerCount: 1,
+    titanGesture: "DROP",
+    kawaiiGesture: "PLUCK",
+    prismGesture: "SHARD",
+  });
   const [activity, setActivity] = useState({ titan: 0, kawaii: 0, prism: 0 });
   const [meters, setMeters] = useState({ reductions: [0, 0, 0, 0, 0], limiter: 0 });
   const recordingTime = useRecordingClock(isRecording, recorderRef);
@@ -218,14 +227,16 @@ const Convergence = () => {
   useEffect(() => () => engineRef.current?.destroy(), []);
 
   const triggerBurst = useCallback(async () => {
+    const burstSeed = seed;
+    setSeed(nextSeed(seed));
     const engine = await getEngine();
     engine.stopDrift();
     setDrifting(false);
-    engine.burst(settingsRef.current, seed);
-  }, [getEngine, seed]);
+    engine.burst(settingsRef.current, burstSeed);
+  }, [getEngine, seed, setSeed]);
 
   const evolve = useCallback(async () => {
-    const evolved = nextSeed(seed);
+    const evolved = nextSeed(nextSeed(seed));
     setSeed(evolved);
     const engine = await getEngine();
     engine.stopDrift();
@@ -337,7 +348,10 @@ const Convergence = () => {
           <section className="border-b border-zinc-800 px-4 py-5 sm:px-6">
             <div className="mb-5 flex items-center justify-between">
               <h2 className="text-[11px] font-black uppercase text-zinc-300">SCENE DNA</h2>
-              <span className="font-mono text-[10px] text-zinc-600">{scene.material} / {scene.scale} / MIDI {scene.root}</span>
+              <div className="min-w-0 text-right font-mono text-zinc-600">
+                <div className="text-[10px]">{scene.material} / {scene.scale} / MIDI {scene.root}</div>
+                <div className="mt-1 truncate text-[9px]">T:{scene.titanGesture} / K:{scene.kawaiiGesture} / P:{scene.prismGesture}</div>
+              </div>
             </div>
             <div className="grid gap-x-6 gap-y-6 sm:grid-cols-2 xl:grid-cols-3">
               <Slider label="Energy" value={settings.energy} accent="#f97316" onChange={(value) => setMacro("energy", value)} />
@@ -405,7 +419,7 @@ const Convergence = () => {
             <div className="grid grid-cols-2 gap-px overflow-hidden rounded border border-zinc-800 bg-zinc-800">
               <div className="bg-[#090d14] p-3">
                 <div className="text-[9px] font-black text-zinc-600">MODE</div>
-                <div className="mt-1 font-mono text-xs text-zinc-200">{drifting ? "DRIFT" : "BURST"}</div>
+                <div className="mt-1 font-mono text-xs text-zinc-200">{drifting ? "DRIFT" : `BURST X${scene.triggerCount}`}</div>
               </div>
               <div className="bg-[#090d14] p-3">
                 <div className="text-[9px] font-black text-zinc-600">MASTER</div>
