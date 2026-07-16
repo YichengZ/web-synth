@@ -519,6 +519,156 @@ const createStemBuses = (ctx, mixBus, workletsReady) => {
   };
 };
 
+const createGranularDelay = (ctx, workletsReady, settings) => {
+  if (!workletsReady) {
+    const fallback = ctx.createDelay(1.5);
+    fallback.delayTime.value = settings.delayMs / 1000;
+    return fallback;
+  }
+  return new AudioWorkletNode(ctx, "granular-delay", {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    outputChannelCount: [2],
+    channelCount: 2,
+    channelCountMode: "explicit",
+    processorOptions: settings,
+  });
+};
+
+const EARLY_FX_PROFILES = {
+  titan: {
+    modDelay: [0.024, 0.12],
+    modDepth: [0.0008, 0.006],
+    modRate: [0.08, 1.7],
+    grainDelay: [70, 290],
+    grainSize: [34, 105],
+    disperse: [55, 920],
+  },
+  kawaii: {
+    modDelay: [0.038, 0.24],
+    modDepth: [0.002, 0.018],
+    modRate: [0.18, 3.8],
+    grainDelay: [85, 480],
+    grainSize: [22, 92],
+    disperse: [180, 5200],
+  },
+  prism: {
+    modDelay: [0.055, 0.38],
+    modDepth: [0.003, 0.026],
+    modRate: [0.11, 5.2],
+    grainDelay: [110, 680],
+    grainSize: [18, 128],
+    disperse: [620, 12500],
+  },
+};
+
+const randomBetween = (rng, range) => range[0] + rng() * (range[1] - range[0]);
+
+const createEarlyFxRack = (engine, dna, stem, destination, startTime, cleanupTime) => {
+  const { ctx, workletsReady } = engine;
+  const rng = dna.rng;
+  const profile = EARLY_FX_PROFILES[stem];
+  const input = ctx.createGain();
+  const output = ctx.createGain();
+  const dry = ctx.createGain();
+  const modDelay = ctx.createDelay(1);
+  const modFilter = createFilter(ctx, "lowpass", stem === "titan" ? 1100 + rng() * 1800 : 2600 + rng() * 7200, 0.7);
+  const modFeedback = ctx.createGain();
+  const modWet = ctx.createGain();
+  const modulator = ctx.createOscillator();
+  const modDepth = ctx.createGain();
+  const grainSettings = {
+    delayMs: randomBetween(rng, profile.grainDelay),
+    grainMs: randomBetween(rng, profile.grainSize),
+    overlap: 2.1 + rng() * 2.7,
+    pitch: pickRandom(rng, [0.5, 0.67, 0.75, 1, 1, 1.25, 1.5, 2]),
+    feedback: 0.08 + rng() * (stem === "titan" ? 0.28 : 0.42),
+    jitter: 0.12 + rng() * 0.76,
+    spread: stem === "titan" ? 0.18 + rng() * 0.42 : 0.45 + rng() * 0.52,
+    seed: hashSeed(dna.seed + Math.floor(rng() * 0xffffffff)),
+  };
+  const granular = createGranularDelay(ctx, workletsReady, grainSettings);
+  const granularWet = ctx.createGain();
+  const disperserWet = ctx.createGain();
+  const allpassCount = 3 + Math.floor(rng() * 5);
+  const allpasses = [];
+  const mixes = [0.055 + rng() * 0.25, 0.045 + rng() * 0.27, 0.055 + rng() * 0.25];
+  const dominant = Math.floor(rng() * mixes.length);
+  mixes[dominant] *= 1.28 + rng() * 0.38;
+  const wetTotal = mixes[0] + mixes[1] + mixes[2];
+
+  dry.gain.value = clamp(0.9 - wetTotal * 0.34, 0.54, 0.76);
+  output.gain.value = 0.9;
+  modDelay.delayTime.value = randomBetween(rng, profile.modDelay);
+  modFeedback.gain.value = 0.06 + rng() * (stem === "titan" ? 0.28 : 0.4);
+  modWet.gain.value = mixes[0];
+  granularWet.gain.value = mixes[1];
+  disperserWet.gain.value = mixes[2];
+  modulator.type = "sine";
+  modulator.frequency.value = randomBetween(rng, profile.modRate);
+  modDepth.gain.value = randomBetween(rng, profile.modDepth);
+
+  input.connect(dry);
+  dry.connect(output);
+  input.connect(modDelay);
+  modDelay.connect(modFilter);
+  modFilter.connect(modFeedback);
+  modFeedback.connect(modDelay);
+  modFilter.connect(modWet);
+  modWet.connect(output);
+  modulator.connect(modDepth);
+  modDepth.connect(modDelay.delayTime);
+  input.connect(granular);
+  granular.connect(granularWet);
+  granularWet.connect(output);
+
+  for (let index = 0; index < allpassCount; index += 1) {
+    const position = (index + 0.5) / allpassCount;
+    const base = profile.disperse[0] * (profile.disperse[1] / profile.disperse[0]) ** position;
+    const allpass = createFilter(ctx, "allpass", base * (0.82 + rng() * 0.36), 2.5 + rng() * 16);
+    allpasses.push(allpass);
+  }
+  input.connect(allpasses[0]);
+  connectSeries(allpasses);
+  allpasses.at(-1).connect(disperserWet);
+  disperserWet.connect(output);
+  output.connect(destination);
+
+  modulator.start(startTime);
+  engine.registerSource(modulator, cleanupTime);
+  engine.registerEffectGraph([
+    input,
+    output,
+    dry,
+    modDelay,
+    modFilter,
+    modFeedback,
+    modWet,
+    modulator,
+    modDepth,
+    granular,
+    granularWet,
+    ...allpasses,
+    disperserWet,
+  ], cleanupTime + 0.05);
+
+  return {
+    input,
+    dominant: ["MOD", "GRAIN", "DISPERSE"][dominant],
+    mix: { mod: mixes[0], grain: mixes[1], disperse: mixes[2] },
+    grainSettings,
+  };
+};
+
+const createSceneEffects = (engine, dna, startTime) => {
+  const cleanupTime = startTime + dna.duration + 2.2;
+  return {
+    titan: createEarlyFxRack(engine, dna, "titan", engine.stems.titan.input, startTime, cleanupTime),
+    kawaii: createEarlyFxRack(engine, dna, "kawaii", engine.stems.kawaii.input, startTime, cleanupTime),
+    prism: createEarlyFxRack(engine, dna, "prism", engine.stems.prism.input, startTime, cleanupTime),
+  };
+};
+
 const scheduleEnvelope = (gain, time, attack, peak, duration, release = 0.08) => {
   gain.cancelScheduledValues(time);
   gain.setValueAtTime(0.0001, time);
@@ -646,7 +796,7 @@ const scheduleTitanPitch = (frequency, base, time, duration, gesture, dna, glide
   }
 };
 
-const spawnTitan = (engine, dna, time, trigger) => {
+const spawnTitan = (engine, dna, time, trigger, destination) => {
   const { ctx, stems } = engine;
   const rng = dna.rng;
   const gesture = trigger.titanGesture;
@@ -724,7 +874,7 @@ const spawnTitan = (engine, dna, time, trigger) => {
   bodyColor.oversample = "4x";
 
   fundamental.connect(fundamentalGain);
-  fundamentalGain.connect(stems.titan.input);
+  fundamentalGain.connect(destination);
   modulator.connect(modulatorGain);
   modulatorGain.connect(bodyLeft.frequency);
   modulatorGain.connect(bodyRight.frequency);
@@ -739,10 +889,10 @@ const spawnTitan = (engine, dna, time, trigger) => {
   upperGain.connect(bodySum);
   bodySum.connect(bodyFilter);
   bodyFilter.connect(bodyColor);
-  bodyColor.connect(stems.titan.input);
+  bodyColor.connect(destination);
   pitchedImpact.connect(impactFilter);
   impactFilter.connect(impactGain);
-  impactGain.connect(stems.titan.input);
+  impactGain.connect(destination);
   fundamental.start(time);
   bodyLeft.start(time);
   bodyRight.start(time);
@@ -761,7 +911,7 @@ const spawnTitan = (engine, dna, time, trigger) => {
   return { baseFrequency, duration, gesture };
 };
 
-const spawnKawaii = (engine, dna, time, titan, trigger) => {
+const spawnKawaii = (engine, dna, time, titan, trigger, destination) => {
   const { ctx, stems } = engine;
   const rng = dna.rng;
   const gesture = trigger.kawaiiGesture;
@@ -861,7 +1011,7 @@ const spawnKawaii = (engine, dna, time, titan, trigger) => {
     voiceSum.connect(filter);
     filter.connect(envelope);
     envelope.connect(panner);
-    panner.connect(stems.kawaii.input);
+    panner.connect(destination);
     fm.start(onset);
     oscillator.start(onset);
     harmonic.start(onset);
@@ -875,7 +1025,7 @@ const spawnKawaii = (engine, dna, time, titan, trigger) => {
   return notes;
 };
 
-const spawnPrism = (engine, dna, time, motif, trigger) => {
+const spawnPrism = (engine, dna, time, motif, trigger, destination) => {
   const { ctx, stems } = engine;
   const rng = dna.rng;
   const gesture = trigger.prismGesture;
@@ -948,7 +1098,7 @@ const spawnPrism = (engine, dna, time, motif, trigger) => {
     oscillator.connect(filter);
     filter.connect(envelope);
     envelope.connect(panner);
-    panner.connect(stems.prism.input);
+    panner.connect(destination);
     oscillator.start(onset);
     engine.registerSource(oscillator, onset + duration + 0.2);
     engine.signalVoice("prism", onset, clamp(dna.energy * trigger.mix.prism * 0.72, 0, 1));
@@ -985,7 +1135,7 @@ const spawnPrism = (engine, dna, time, motif, trigger) => {
       oscillator.connect(bloomFilter);
       bloomFilter.connect(envelope);
       envelope.connect(panner);
-      panner.connect(stems.prism.input);
+      panner.connect(destination);
       oscillator.start(onset);
       engine.registerSource(oscillator, onset + duration + 0.1);
       engine.signalVoice("prism", onset, clamp(dna.energy * trigger.mix.prism * 0.52, 0, 1));
@@ -999,6 +1149,7 @@ export class ConvergenceEngine {
     this.onVoice = onVoice;
     this.onRecordLimit = onRecordLimit;
     this.activeSources = new Set();
+    this.activeEffects = new Set();
     this.driftTimer = null;
     this.masterMode = "BRUTAL";
     this.masterDrive = 12;
@@ -1149,6 +1300,20 @@ export class ConvergenceEngine {
     source.stop(stopTime);
   }
 
+  registerEffectGraph(nodes, cleanupTime) {
+    let timer = null;
+    const cleanup = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      nodes.forEach((node) => {
+        try { node.disconnect(); } catch (error) { /* already disconnected */ }
+      });
+      this.activeEffects.delete(cleanup);
+    };
+    const delay = Math.max(0, (cleanupTime - this.ctx.currentTime) * 1000);
+    this.activeEffects.add(cleanup);
+    timer = window.setTimeout(cleanup, delay);
+  }
+
   signalVoice(stem, time, intensity) {
     const delay = Math.max(0, (time - this.ctx.currentTime) * 1000);
     window.setTimeout(() => this.onVoice?.({ stem, intensity, time }), delay);
@@ -1156,11 +1321,26 @@ export class ConvergenceEngine {
 
   scheduleScene(settings, seed, startTime = this.ctx.currentTime + 0.035) {
     const dna = createSceneDna(seed, settings);
+    const sceneEffects = createSceneEffects(this, dna, startTime);
     dna.triggers.forEach((trigger) => {
       const triggerTime = startTime + trigger.offset;
-      const titan = spawnTitan(this, dna, triggerTime + trigger.timing.titan, trigger);
-      const motif = spawnKawaii(this, dna, triggerTime + trigger.timing.kawaii, titan, trigger);
-      spawnPrism(this, dna, triggerTime + trigger.timing.prism, motif, trigger);
+      const titan = spawnTitan(this, dna, triggerTime + trigger.timing.titan, trigger, sceneEffects.titan.input);
+      const motif = spawnKawaii(
+        this,
+        dna,
+        triggerTime + trigger.timing.kawaii,
+        titan,
+        trigger,
+        sceneEffects.kawaii.input,
+      );
+      spawnPrism(
+        this,
+        dna,
+        triggerTime + trigger.timing.prism,
+        motif,
+        trigger,
+        sceneEffects.prism.input,
+      );
     });
     const primaryTrigger = dna.triggers[0];
     this.onScene?.({
@@ -1173,6 +1353,11 @@ export class ConvergenceEngine {
       titanGesture: primaryTrigger.titanGesture,
       kawaiiGesture: primaryTrigger.kawaiiGesture,
       prismGesture: primaryTrigger.prismGesture,
+      fx: {
+        titan: sceneEffects.titan.dominant,
+        kawaii: sceneEffects.kawaii.dominant,
+        prism: sceneEffects.prism.dominant,
+      },
     });
     return dna;
   }
@@ -1208,6 +1393,7 @@ export class ConvergenceEngine {
       try { source.stop(stopTime); } catch (error) { /* already stopped */ }
     });
     this.activeSources.clear();
+    [...this.activeEffects].forEach((cleanup) => cleanup());
   }
 
   getMeterState() {

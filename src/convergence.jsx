@@ -88,6 +88,7 @@ const Convergence = () => {
     titanGesture: "DROP",
     kawaiiGesture: "PLUCK",
     prismGesture: "SHARD",
+    fx: { titan: "MOD", kawaii: "GRAIN", prism: "DISPERSE" },
   });
   const [activity, setActivity] = useState({ titan: 0, kawaii: 0, prism: 0 });
   const [meters, setMeters] = useState({ reductions: [0, 0, 0, 0, 0], limiter: 0 });
@@ -350,7 +351,8 @@ const Convergence = () => {
               <h2 className="text-[11px] font-black uppercase text-zinc-300">SCENE DNA</h2>
               <div className="min-w-0 text-right font-mono text-zinc-600">
                 <div className="text-[10px]">{scene.material} / {scene.scale} / MIDI {scene.root}</div>
-                <div className="mt-1 truncate text-[9px]">T:{scene.titanGesture} / K:{scene.kawaiiGesture} / P:{scene.prismGesture}</div>
+                <div data-scene-seed={scene.seed} className="mt-1 truncate text-[9px]">T:{scene.titanGesture} / K:{scene.kawaiiGesture} / P:{scene.prismGesture}</div>
+                <div className="mt-1 truncate text-[9px]">FX T:{scene.fx.titan} / K:{scene.fx.kawaii} / P:{scene.fx.prism}</div>
               </div>
             </div>
             <div className="grid gap-x-6 gap-y-6 sm:grid-cols-2 xl:grid-cols-3">

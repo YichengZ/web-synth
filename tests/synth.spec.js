@@ -111,22 +111,30 @@ test("CONVERGENCE advances seeds and varies scene gestures", async ({ page }) =>
   const stop = page.getByRole("button", { name: "Stop all convergence voices" });
   const seed = page.getByLabel("Scene seed");
   const gesture = page.getByText(/^T:/);
+  const effects = page.getByText(/^FX T:/);
   const seenGestures = new Set();
+  const seenEffects = new Set();
   const seenTriggerCounts = new Set();
   let previousSeed = await seed.inputValue();
+  let previousSceneSeed = await gesture.getAttribute("data-scene-seed");
 
   for (let index = 0; index < 4; index += 1) {
     await burst.click();
     await expect(seed).not.toHaveValue(previousSeed);
+    await expect(gesture).not.toHaveAttribute("data-scene-seed", previousSceneSeed);
     await expect(gesture).toHaveText(/^T:(DROP|RISE|PULSE|BOUNCE|GLIDE) \/ K:(PLUCK|STAB|CHORD|BEND|PULSE) \/ P:(SHARD|RIBBON|SWELL|CASCADE|PULSE)$/);
+    await expect(effects).toHaveText(/^FX T:(MOD|GRAIN|DISPERSE) \/ K:(MOD|GRAIN|DISPERSE) \/ P:(MOD|GRAIN|DISPERSE)$/);
     const mode = await page.getByText(/^BURST X[1-4]$/).textContent();
     seenGestures.add(await gesture.textContent());
+    seenEffects.add(await effects.textContent());
     seenTriggerCounts.add(mode);
     previousSeed = await seed.inputValue();
+    previousSceneSeed = await gesture.getAttribute("data-scene-seed");
     await stop.click();
   }
 
   expect(seenGestures.size).toBeGreaterThan(1);
+  expect(seenEffects.size).toBeGreaterThan(1);
   expect(seenTriggerCounts.size).toBeGreaterThan(1);
 });
 

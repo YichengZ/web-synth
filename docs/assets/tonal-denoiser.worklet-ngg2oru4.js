@@ -234,3 +234,108 @@ class TransientShaperProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor("transient-shaper", TransientShaperProcessor);
+
+class GranularDelayProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    const settings = options.processorOptions || {};
+    this.bufferLength = Math.ceil(sampleRate * 1.5);
+    this.buffer = [new Float32Array(this.bufferLength), new Float32Array(this.bufferLength)];
+    this.delaySamples = clamp(Number(settings.delayMs) || 180, 25, 1200) * sampleRate / 1000;
+    this.grainSamples = clamp(Number(settings.grainMs) || 65, 12, 180) * sampleRate / 1000;
+    this.overlap = clamp(Number(settings.overlap) || 3, 1.5, 6);
+    this.intervalSamples = Math.max(32, this.grainSamples / this.overlap);
+    this.pitch = clamp(Number(settings.pitch) || 1, 0.4, 2.5);
+    this.feedback = clamp(Number(settings.feedback) || 0.2, 0, 0.62);
+    this.jitter = clamp(Number(settings.jitter) || 0.35, 0, 1);
+    this.spread = clamp(Number(settings.spread) || 0.7, 0, 1);
+    this.randomState = (Number(settings.seed) || 1) >>> 0;
+    this.writeIndex = 0;
+    this.samplesUntilGrain = 0;
+    this.lastWet = [0, 0];
+    this.grains = [];
+    this.windowTable = new Float32Array(1024);
+    for (let index = 0; index < this.windowTable.length; index += 1) {
+      this.windowTable[index] = Math.sin(Math.PI * index / (this.windowTable.length - 1)) ** 2;
+    }
+  }
+
+  random() {
+    this.randomState ^= this.randomState << 13;
+    this.randomState ^= this.randomState >>> 17;
+    this.randomState ^= this.randomState << 5;
+    return (this.randomState >>> 0) / 4294967296;
+  }
+
+  read(channel, position) {
+    const wrapped = ((position % this.bufferLength) + this.bufferLength) % this.bufferLength;
+    const first = Math.floor(wrapped);
+    const second = (first + 1) % this.bufferLength;
+    const fraction = wrapped - first;
+    return this.buffer[channel][first] * (1 - fraction) + this.buffer[channel][second] * fraction;
+  }
+
+  spawnGrain() {
+    const length = Math.max(32, Math.floor(this.grainSamples * (0.78 + this.random() * 0.44)));
+    const jitter = (this.random() * 2 - 1) * this.delaySamples * this.jitter * 0.55;
+    const pan = (this.random() * 2 - 1) * this.spread;
+    const angle = (pan + 1) * Math.PI * 0.25;
+    this.grains.push({
+      age: 0,
+      length,
+      position: this.writeIndex - this.delaySamples + jitter,
+      rate: this.pitch * (0.97 + this.random() * 0.06),
+      leftGain: Math.cos(angle),
+      rightGain: Math.sin(angle),
+    });
+  }
+
+  process(inputs, outputs) {
+    const input = inputs[0];
+    const output = outputs[0];
+    const frameLength = output[0]?.length || 128;
+    const normalization = 1 / Math.sqrt(this.overlap);
+
+    for (let sample = 0; sample < frameLength; sample += 1) {
+      if (this.samplesUntilGrain <= 0) {
+        this.spawnGrain();
+        this.samplesUntilGrain += this.intervalSamples * (0.82 + this.random() * 0.36);
+      }
+      this.samplesUntilGrain -= 1;
+
+      let wetLeft = 0;
+      let wetRight = 0;
+      for (let index = this.grains.length - 1; index >= 0; index -= 1) {
+        const grain = this.grains[index];
+        const phase = grain.age / grain.length;
+        const windowIndex = Math.min(this.windowTable.length - 1, Math.floor(phase * this.windowTable.length));
+        const windowValue = this.windowTable[windowIndex];
+        const readPosition = grain.position + grain.age * grain.rate;
+        const grainSample = (this.read(0, readPosition) + this.read(1, readPosition)) * 0.5 * windowValue;
+        wetLeft += grainSample * grain.leftGain;
+        wetRight += grainSample * grain.rightGain;
+        grain.age += 1;
+        if (grain.age >= grain.length) {
+          this.grains[index] = this.grains[this.grains.length - 1];
+          this.grains.pop();
+        }
+      }
+
+      wetLeft *= normalization;
+      wetRight *= normalization;
+      const inputLeft = input[0]?.[sample] || 0;
+      const inputRight = (input[1] || input[0])?.[sample] || 0;
+      this.buffer[0][this.writeIndex] = clamp(inputLeft + this.lastWet[0] * this.feedback, -1.5, 1.5);
+      this.buffer[1][this.writeIndex] = clamp(inputRight + this.lastWet[1] * this.feedback, -1.5, 1.5);
+      output[0][sample] = wetLeft;
+      if (output[1]) output[1][sample] = wetRight;
+      this.lastWet[0] = wetLeft;
+      this.lastWet[1] = wetRight;
+      this.writeIndex = (this.writeIndex + 1) % this.bufferLength;
+    }
+
+    return true;
+  }
+}
+
+registerProcessor("granular-delay", GranularDelayProcessor);
