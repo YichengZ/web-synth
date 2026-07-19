@@ -425,7 +425,7 @@ const Convergence = () => {
               </div>
               <div className="bg-[#090d14] p-3">
                 <div className="text-[9px] font-black text-zinc-600">MASTER</div>
-                <div className="mt-1 font-mono text-xs text-zinc-200">{masterMode === "BRUTAL" ? "SERIAL CLIP" : masterMode === "MULTIBAND" ? "5 BAND" : "RC CURVE"}</div>
+                <div className="mt-1 font-mono text-xs text-zinc-200">{masterMode === "BRUTAL" ? "OTT > CLIP" : masterMode === "MULTIBAND" ? "5 BAND" : "RC CURVE"}</div>
               </div>
               <div className="bg-[#090d14] p-3">
                 <div className="text-[9px] font-black text-zinc-600">SCENE</div>

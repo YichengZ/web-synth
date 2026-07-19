@@ -11,6 +11,8 @@ const SCALES = {
 const MATERIALS = ["GLASS", "RUBBER", "PLASMA", "ALLOY"];
 const SCALE_NAMES = Object.keys(SCALES);
 const CROSSOVERS = [90, 360, 1800, 6500];
+const OTT_CROSSOVERS = [140, 1050, 4800];
+const MAX_ACTIVE_EFFECT_RACKS = 6;
 const TITAN_GESTURES = ["DROP", "RISE", "PULSE", "BOUNCE", "GLIDE"];
 const KAWAII_GESTURES = ["PLUCK", "STAB", "CHORD", "BEND", "PULSE"];
 const PRISM_GESTURES = ["SHARD", "RIBBON", "SWELL", "CASCADE", "PULSE"];
@@ -124,18 +126,18 @@ const createFilter = (ctx, type, frequency, q = Math.SQRT1_2) => {
   return filter;
 };
 
-const createBandPath = (ctx, input, bandIndex) => {
+const createBandPath = (ctx, input, bandIndex, crossovers = CROSSOVERS) => {
   const filters = [];
   if (bandIndex > 0) {
     filters.push(
-      createFilter(ctx, "highpass", CROSSOVERS[bandIndex - 1]),
-      createFilter(ctx, "highpass", CROSSOVERS[bandIndex - 1]),
+      createFilter(ctx, "highpass", crossovers[bandIndex - 1]),
+      createFilter(ctx, "highpass", crossovers[bandIndex - 1]),
     );
   }
-  if (bandIndex < CROSSOVERS.length) {
+  if (bandIndex < crossovers.length) {
     filters.push(
-      createFilter(ctx, "lowpass", CROSSOVERS[bandIndex]),
-      createFilter(ctx, "lowpass", CROSSOVERS[bandIndex]),
+      createFilter(ctx, "lowpass", crossovers[bandIndex]),
+      createFilter(ctx, "lowpass", crossovers[bandIndex]),
     );
   }
   input.connect(filters[0]);
@@ -254,21 +256,89 @@ const createInflatorMaster = (ctx) => {
   };
 };
 
-const createTransientShaper = (ctx, workletsReady, amount = 1.2) => {
-  if (!workletsReady) return ctx.createGain();
-  return new AudioWorkletNode(ctx, "transient-shaper", {
+const createResilientWorkletStage = (ctx, workletsReady, processorName, processorOptions) => {
+  const input = ctx.createGain();
+  const output = ctx.createGain();
+  if (!workletsReady) {
+    input.connect(output);
+    return { input, output, processor: null };
+  }
+
+  const processor = new AudioWorkletNode(ctx, processorName, {
     numberOfInputs: 1,
     numberOfOutputs: 1,
     outputChannelCount: [2],
     channelCount: 2,
     channelCountMode: "explicit",
-    processorOptions: { amount },
+    processorOptions,
   });
+  let bypassed = false;
+  input.connect(processor);
+  processor.connect(output);
+  processor.addEventListener("processorerror", () => {
+    if (bypassed) return;
+    bypassed = true;
+    try { input.disconnect(processor); } catch (error) { /* already disconnected */ }
+    try { processor.disconnect(output); } catch (error) { /* already disconnected */ }
+    input.connect(output);
+    console.warn(`${processorName} failed; switched to transparent bypass.`);
+  });
+  return { input, output, processor };
+};
+
+const createTransientShaper = (ctx, workletsReady, amount = 1.2) => {
+  return createResilientWorkletStage(ctx, workletsReady, "transient-shaper", { amount });
+};
+
+const createOttSweetener = (ctx) => {
+  const input = ctx.createGain();
+  const sum = ctx.createGain();
+  const lowShelf = createFilter(ctx, "lowshelf", 105);
+  const presence = createFilter(ctx, "peaking", 3200, 0.72);
+  const airShelf = createFilter(ctx, "highshelf", 9100);
+  const output = ctx.createGain();
+  const thresholds = [-25, -27, -29, -31];
+  const ratios = [3, 3.5, 4.5, 5.5];
+  const attacks = [0.026, 0.015, 0.007, 0.003];
+  const releases = [0.22, 0.16, 0.1, 0.065];
+  const dryMixes = [0.52, 0.48, 0.43, 0.38];
+  const wetMixes = [0.36, 0.38, 0.41, 0.44];
+  const makeupDb = [2, 2.7, 3.5, 4.2];
+  const compressors = [];
+
+  thresholds.forEach((threshold, bandIndex) => {
+    const bandOutput = createBandPath(ctx, input, bandIndex, OTT_CROSSOVERS);
+    const dry = ctx.createGain();
+    const compressor = ctx.createDynamicsCompressor();
+    const wet = ctx.createGain();
+    dry.gain.value = dryMixes[bandIndex];
+    compressor.threshold.value = threshold;
+    compressor.knee.value = 12;
+    compressor.ratio.value = ratios[bandIndex];
+    compressor.attack.value = attacks[bandIndex];
+    compressor.release.value = releases[bandIndex];
+    wet.gain.value = wetMixes[bandIndex] * dbToGain(makeupDb[bandIndex]);
+    bandOutput.connect(dry);
+    bandOutput.connect(compressor);
+    compressor.connect(wet);
+    dry.connect(sum);
+    wet.connect(sum);
+    compressors.push(compressor);
+  });
+
+  sum.gain.value = 0.92;
+  lowShelf.gain.value = 0.45;
+  presence.gain.value = 0.7;
+  airShelf.gain.value = 0.85;
+  output.gain.value = 0.98;
+  connectSeries([sum, lowShelf, presence, airShelf, output]);
+  return { input, output, compressors, lowShelf, presence, airShelf };
 };
 
 const createBrutalMaster = (ctx, workletsReady) => {
   const input = ctx.createGain();
   const dcFilter = createFilter(ctx, "highpass", 18, 0.7);
+  const safetySaturator = ctx.createWaveShaper();
   const sum = ctx.createGain();
   const l3Limiter = ctx.createDynamicsCompressor();
   const inflatorDrive = ctx.createGain();
@@ -280,6 +350,7 @@ const createBrutalMaster = (ctx, workletsReady) => {
   const colorDrive = ctx.createGain();
   const color = ctx.createWaveShaper();
   const colorTrim = ctx.createGain();
+  const ottSweetener = createOttSweetener(ctx);
   const transientShaper = createTransientShaper(ctx, workletsReady, 1.35);
   const softClipper = ctx.createWaveShaper();
   const hardCeiling = ctx.createWaveShaper();
@@ -291,6 +362,8 @@ const createBrutalMaster = (ctx, workletsReady) => {
   const priorityGains = [];
 
   input.gain.value = dbToGain(12);
+  safetySaturator.curve = createSaturationCurve(1.45, 0, 0.32);
+  safetySaturator.oversample = "4x";
   sum.gain.value = 0.68;
   l3Limiter.threshold.value = -4.5;
   l3Limiter.knee.value = 1;
@@ -312,10 +385,12 @@ const createBrutalMaster = (ctx, workletsReady) => {
   softClipper.oversample = "4x";
   hardCeiling.curve = createHardCeilingCurve(-1);
   hardCeiling.oversample = "4x";
+  output.gain.value = 0.975;
 
   input.connect(dcFilter);
+  dcFilter.connect(safetySaturator);
   thresholds.forEach((threshold, bandIndex) => {
-    const bandOutput = createBandPath(ctx, dcFilter, bandIndex);
+    const bandOutput = createBandPath(ctx, safetySaturator, bandIndex);
     const compressor = ctx.createDynamicsCompressor();
     const priority = ctx.createGain();
     compressor.threshold.value = threshold;
@@ -343,7 +418,14 @@ const createBrutalMaster = (ctx, workletsReady) => {
     colorDrive,
     color,
     colorTrim,
-    transientShaper,
+    ottSweetener.input,
+  ]);
+  connectSeries([
+    ottSweetener.output,
+    transientShaper.input,
+  ]);
+  connectSeries([
+    transientShaper.output,
     softClipper,
     hardCeiling,
     output,
@@ -359,7 +441,9 @@ const createBrutalMaster = (ctx, workletsReady) => {
     bodyDip,
     highShelf,
     inflator,
-    transientShaper,
+    transientShaper: transientShaper.processor,
+    ottSweetener,
+    safetySaturator,
   };
 };
 
@@ -377,15 +461,7 @@ const createImpulse = (ctx, duration = 1.7, decay = 2.8) => {
 };
 
 const createTonalDenoiser = (ctx, workletsReady, settings) => {
-  if (!workletsReady) return ctx.createGain();
-  return new AudioWorkletNode(ctx, "tonal-denoiser", {
-    numberOfInputs: 1,
-    numberOfOutputs: 1,
-    outputChannelCount: [2],
-    channelCount: 2,
-    channelCountMode: "explicit",
-    processorOptions: settings,
-  });
+  return createResilientWorkletStage(ctx, workletsReady, "tonal-denoiser", settings);
 };
 
 const createStemColor = (ctx, driveDb, curveSettings) => {
@@ -416,7 +492,10 @@ const createStemBuses = (ctx, mixBus, workletsReady) => {
     titanColor.drive,
     titanColor.saturation,
     titanColor.trim,
-    titanDenoiser,
+    titanDenoiser.input,
+  ]);
+  connectSeries([
+    titanDenoiser.output,
     titanDuck,
     titanLevel,
     mixBus,
@@ -454,7 +533,10 @@ const createStemBuses = (ctx, mixBus, workletsReady) => {
     kawaiiColor.drive,
     kawaiiColor.saturation,
     kawaiiColor.trim,
-    kawaiiDenoiser,
+    kawaiiDenoiser.input,
+  ]);
+  connectSeries([
+    kawaiiDenoiser.output,
     kawaiiDuck,
     kawaiiLevel,
     mixBus,
@@ -488,7 +570,10 @@ const createStemBuses = (ctx, mixBus, workletsReady) => {
     prismColor.drive,
     prismColor.saturation,
     prismColor.trim,
-    prismDenoiser,
+    prismDenoiser.input,
+  ]);
+  connectSeries([
+    prismDenoiser.output,
     prismDuck,
     prismLevel,
     mixBus,
@@ -500,21 +585,21 @@ const createStemBuses = (ctx, mixBus, workletsReady) => {
       input: titanInput,
       duck: titanDuck,
       level: titanLevel,
-      denoiser: titanDenoiser,
+      denoiser: titanDenoiser.processor,
     },
     kawaii: {
       name: "kawaii",
       input: kawaiiInput,
       duck: kawaiiDuck,
       level: kawaiiLevel,
-      denoiser: kawaiiDenoiser,
+      denoiser: kawaiiDenoiser.processor,
     },
     prism: {
       name: "prism",
       input: prismInput,
       duck: prismDuck,
       level: prismLevel,
-      denoiser: prismDenoiser,
+      denoiser: prismDenoiser.processor,
     },
   };
 };
@@ -589,9 +674,14 @@ const createEarlyFxRack = (engine, dna, stem, destination, startTime, cleanupTim
   };
   const granular = createGranularDelay(ctx, workletsReady, grainSettings);
   const granularWet = ctx.createGain();
+  const modToGranular = ctx.createGain();
+  const granularToDisperser = ctx.createGain();
+  const disperserSplitter = ctx.createChannelSplitter(2);
+  const disperserMerger = ctx.createChannelMerger(2);
   const disperserWet = ctx.createGain();
-  const allpassCount = 3 + Math.floor(rng() * 5);
-  const allpasses = [];
+  const allpassCount = 4 + Math.floor(rng() * 4);
+  const leftAllpasses = [];
+  const rightAllpasses = [];
   const mixes = [0.055 + rng() * 0.25, 0.045 + rng() * 0.27, 0.055 + rng() * 0.25];
   const dominant = Math.floor(rng() * mixes.length);
   mixes[dominant] *= 1.28 + rng() * 0.38;
@@ -604,7 +694,9 @@ const createEarlyFxRack = (engine, dna, stem, destination, startTime, cleanupTim
   modWet.gain.value = mixes[0];
   granularWet.gain.value = mixes[1];
   disperserWet.gain.value = mixes[2];
-  modulator.type = "sine";
+  modToGranular.gain.value = 0.035 + rng() * 0.16;
+  granularToDisperser.gain.value = 0.03 + rng() * 0.14;
+  modulator.type = pickRandom(rng, ["sine", "sine", "triangle"]);
   modulator.frequency.value = randomBetween(rng, profile.modRate);
   modDepth.gain.value = randomBetween(rng, profile.modDepth);
 
@@ -615,22 +707,31 @@ const createEarlyFxRack = (engine, dna, stem, destination, startTime, cleanupTim
   modFilter.connect(modFeedback);
   modFeedback.connect(modDelay);
   modFilter.connect(modWet);
+  modFilter.connect(modToGranular);
+  modToGranular.connect(granular);
   modWet.connect(output);
   modulator.connect(modDepth);
   modDepth.connect(modDelay.delayTime);
   input.connect(granular);
   granular.connect(granularWet);
+  granular.connect(granularToDisperser);
+  granularToDisperser.connect(disperserSplitter);
   granularWet.connect(output);
 
   for (let index = 0; index < allpassCount; index += 1) {
     const position = (index + 0.5) / allpassCount;
     const base = profile.disperse[0] * (profile.disperse[1] / profile.disperse[0]) ** position;
-    const allpass = createFilter(ctx, "allpass", base * (0.82 + rng() * 0.36), 2.5 + rng() * 16);
-    allpasses.push(allpass);
+    leftAllpasses.push(createFilter(ctx, "allpass", base * (0.78 + rng() * 0.38), 2.5 + rng() * 18));
+    rightAllpasses.push(createFilter(ctx, "allpass", base * (0.84 + rng() * 0.42), 2.5 + rng() * 18));
   }
-  input.connect(allpasses[0]);
-  connectSeries(allpasses);
-  allpasses.at(-1).connect(disperserWet);
+  input.connect(disperserSplitter);
+  disperserSplitter.connect(leftAllpasses[0], 0, 0);
+  disperserSplitter.connect(rightAllpasses[0], 1, 0);
+  connectSeries(leftAllpasses);
+  connectSeries(rightAllpasses);
+  leftAllpasses.at(-1).connect(disperserMerger, 0, 0);
+  rightAllpasses.at(-1).connect(disperserMerger, 0, 1);
+  disperserMerger.connect(disperserWet);
   disperserWet.connect(output);
   output.connect(destination);
 
@@ -648,7 +749,12 @@ const createEarlyFxRack = (engine, dna, stem, destination, startTime, cleanupTim
     modDepth,
     granular,
     granularWet,
-    ...allpasses,
+    modToGranular,
+    granularToDisperser,
+    disperserSplitter,
+    disperserMerger,
+    ...leftAllpasses,
+    ...rightAllpasses,
     disperserWet,
   ], cleanupTime + 0.05);
 
@@ -1204,9 +1310,13 @@ export class ConvergenceEngine {
     this.inflatorModeGain.gain.value = this.masterMode === "INFLATOR" ? 1 : 0;
     this.brutalModeGain.gain.value = this.masterMode === "BRUTAL" ? 1 : 0;
 
-    this.mixBus.connect(this.multiband.input);
-    this.mixBus.connect(this.inflator.input);
-    this.mixBus.connect(this.brutal.input);
+    this.masterInputs = {
+      MULTIBAND: this.multiband.input,
+      INFLATOR: this.inflator.input,
+      BRUTAL: this.brutal.input,
+    };
+    this.connectedMasterInput = this.masterInputs[this.masterMode];
+    this.mixBus.connect(this.connectedMasterInput);
     this.multiband.output.connect(this.multibandModeGain);
     this.inflator.output.connect(this.inflatorModeGain);
     this.brutal.output.connect(this.brutalModeGain);
@@ -1225,6 +1335,12 @@ export class ConvergenceEngine {
   setMasterMode(mode) {
     this.masterMode = ["MULTIBAND", "INFLATOR", "BRUTAL"].includes(mode) ? mode : "BRUTAL";
     if (!this.brutalModeGain) return;
+    const nextInput = this.masterInputs[this.masterMode];
+    if (nextInput !== this.connectedMasterInput) {
+      try { this.mixBus.disconnect(this.connectedMasterInput); } catch (error) { /* already disconnected */ }
+      this.mixBus.connect(nextInput);
+      this.connectedMasterInput = nextInput;
+    }
     const time = this.ctx.currentTime;
     this.multibandModeGain.gain.setTargetAtTime(this.masterMode === "MULTIBAND" ? 1 : 0, time, 0.025);
     this.inflatorModeGain.gain.setTargetAtTime(this.masterMode === "INFLATOR" ? 1 : 0, time, 0.025);
@@ -1280,6 +1396,9 @@ export class ConvergenceEngine {
       48 + this.masterTone * 24,
       false,
     );
+    this.brutal.ottSweetener.lowShelf.gain.setTargetAtTime(0.15 + this.masterTone * 0.65, time, 0.05);
+    this.brutal.ottSweetener.presence.gain.setTargetAtTime(0.3 + this.masterTone * 0.8, time, 0.05);
+    this.brutal.ottSweetener.airShelf.gain.setTargetAtTime(0.35 + this.masterTone * 0.95, time, 0.05);
   }
 
   setOutputLevel(value) {
@@ -1310,6 +1429,10 @@ export class ConvergenceEngine {
       this.activeEffects.delete(cleanup);
     };
     const delay = Math.max(0, (cleanupTime - this.ctx.currentTime) * 1000);
+    while (this.activeEffects.size >= MAX_ACTIVE_EFFECT_RACKS) {
+      const oldestCleanup = this.activeEffects.values().next().value;
+      oldestCleanup?.();
+    }
     this.activeEffects.add(cleanup);
     timer = window.setTimeout(cleanup, delay);
   }

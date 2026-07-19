@@ -5,6 +5,7 @@ const BIN_COUNT = FFT_SIZE / 2 + 1;
 const EPSILON = 1e-12;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const finiteSample = (value, limit = 8) => Number.isFinite(value) ? clamp(value, -limit, limit) : 0;
 
 const fft = (real, imaginary, inverse = false) => {
   const length = real.length;
@@ -171,9 +172,9 @@ class TonalDenoiserProcessor extends AudioWorkletProcessor {
       const outputIndex = this.sampleIndex % RING_SIZE;
       for (let channel = 0; channel < output.length; channel += 1) {
         const sourceChannel = input[channel] || input[0];
-        const sourceSample = sourceChannel ? sourceChannel[sample] : 0;
+        const sourceSample = finiteSample(sourceChannel ? sourceChannel[sample] : 0, 4);
         this.inputRing[channel][this.writeIndex] = sourceSample;
-        output[channel][sample] = this.outputRing[channel][outputIndex];
+        output[channel][sample] = finiteSample(this.outputRing[channel][outputIndex]);
         this.outputRing[channel][outputIndex] = 0;
       }
 
@@ -212,7 +213,10 @@ class TransientShaperProcessor extends AudioWorkletProcessor {
     for (let sample = 0; sample < frameLength; sample += 1) {
       let linkedLevel = 0;
       for (let channel = 0; channel < output.length; channel += 1) {
-        linkedLevel = Math.max(linkedLevel, Math.abs((input[channel] || input[0])?.[sample] || 0));
+        linkedLevel = Math.max(
+          linkedLevel,
+          Math.abs(finiteSample((input[channel] || input[0])?.[sample] || 0, 4)),
+        );
       }
 
       const fastCoefficient = linkedLevel > this.fastEnvelope ? this.fastAttack : this.fastRelease;
@@ -225,7 +229,8 @@ class TransientShaperProcessor extends AudioWorkletProcessor {
       this.smoothedGain += (Math.min(2.4, targetGain) - this.smoothedGain) * 0.22;
 
       for (let channel = 0; channel < output.length; channel += 1) {
-        output[channel][sample] = ((input[channel] || input[0])?.[sample] || 0) * this.smoothedGain;
+        const sourceSample = finiteSample((input[channel] || input[0])?.[sample] || 0, 4);
+        output[channel][sample] = finiteSample(sourceSample * this.smoothedGain);
       }
     }
 
@@ -272,7 +277,10 @@ class GranularDelayProcessor extends AudioWorkletProcessor {
     const first = Math.floor(wrapped);
     const second = (first + 1) % this.bufferLength;
     const fraction = wrapped - first;
-    return this.buffer[channel][first] * (1 - fraction) + this.buffer[channel][second] * fraction;
+    return finiteSample(
+      this.buffer[channel][first] * (1 - fraction) + this.buffer[channel][second] * fraction,
+      2,
+    );
   }
 
   spawnGrain() {
@@ -321,12 +329,12 @@ class GranularDelayProcessor extends AudioWorkletProcessor {
         }
       }
 
-      wetLeft *= normalization;
-      wetRight *= normalization;
-      const inputLeft = input[0]?.[sample] || 0;
-      const inputRight = (input[1] || input[0])?.[sample] || 0;
-      this.buffer[0][this.writeIndex] = clamp(inputLeft + this.lastWet[0] * this.feedback, -1.5, 1.5);
-      this.buffer[1][this.writeIndex] = clamp(inputRight + this.lastWet[1] * this.feedback, -1.5, 1.5);
+      wetLeft = finiteSample(wetLeft * normalization, 2);
+      wetRight = finiteSample(wetRight * normalization, 2);
+      const inputLeft = finiteSample(input[0]?.[sample] || 0, 2);
+      const inputRight = finiteSample((input[1] || input[0])?.[sample] || 0, 2);
+      this.buffer[0][this.writeIndex] = finiteSample(inputLeft + this.lastWet[0] * this.feedback, 1.5);
+      this.buffer[1][this.writeIndex] = finiteSample(inputRight + this.lastWet[1] * this.feedback, 1.5);
       output[0][sample] = wetLeft;
       if (output[1]) output[1][sample] = wetRight;
       this.lastWet[0] = wetLeft;

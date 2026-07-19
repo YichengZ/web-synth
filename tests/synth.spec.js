@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { readFile, stat } from "node:fs/promises";
 
+test.describe.configure({ mode: "serial" });
+
 const synths = [
   { name: "PRISM", path: "/CrystalPrism.html" },
   { name: "Kawaii", path: "/KawaiiSynth.html" },
@@ -90,6 +92,7 @@ test("CONVERGENCE switches between all master bus presets", async ({ page }) => 
   await expect(brutal).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByLabel("Drive")).toHaveValue("12");
   await expect(page.getByLabel("Tone")).toBeVisible();
+  await expect(page.getByText("OTT > CLIP")).toBeVisible();
 });
 
 test("CONVERGENCE initializes tonal worklets at 96 kHz", async ({ page }) => {
@@ -136,6 +139,52 @@ test("CONVERGENCE advances seeds and varies scene gestures", async ({ page }) =>
   expect(seenGestures.size).toBeGreaterThan(1);
   expect(seenEffects.size).toBeGreaterThan(1);
   expect(seenTriggerCounts.size).toBeGreaterThan(1);
+});
+
+test("CONVERGENCE recovers after extreme overlapping bursts", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "The overload recovery path is covered once on desktop.");
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error" || message.type() === "warning") errors.push(message.text());
+  });
+  await page.addInitScript(() => {
+    const NativeAudioContext = window.AudioContext;
+    window.AudioContext = class TestAudioContext extends NativeAudioContext {
+      constructor(...args) {
+        super(...args);
+        window.__testAudioContext = this;
+      }
+    };
+  });
+  await page.goto("/Convergence.html");
+  await page.getByLabel("Density").fill("1");
+  await page.getByLabel("Drive").fill("18");
+  const burst = page.getByRole("button", { name: "Generate convergence burst" });
+  for (let index = 0; index < 10; index += 1) await burst.click();
+  await page.getByRole("button", { name: "Stop all convergence voices" }).click();
+
+  await page.getByRole("button", { name: "REC WAV", exact: true }).click();
+  const startTime = await page.evaluate(() => window.__testAudioContext.currentTime);
+  await burst.click();
+  await page.waitForFunction(
+    (start) => window.__testAudioContext.currentTime - start >= 0.35,
+    startTime,
+    { timeout: 20_000 },
+  );
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: /^STOP/ }).first().click();
+  const download = await downloadPromise;
+  const wav = await readFile(await download.path());
+  let peak = 0;
+  for (let offset = 44; offset + 2 < wav.length; offset += 3) {
+    let sample = wav[offset] | (wav[offset + 1] << 8) | (wav[offset + 2] << 16);
+    if (sample & 0x800000) sample |= 0xff000000;
+    peak = Math.max(peak, Math.abs(sample / 0x800000));
+  }
+  expect(peak).toBeGreaterThan(0.01);
+  expect(peak).toBeLessThan(0.9);
+  expect(errors).toEqual([]);
 });
 
 test.describe("recording", () => {
