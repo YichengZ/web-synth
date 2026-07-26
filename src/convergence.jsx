@@ -1,7 +1,7 @@
 import React from "react";
 import * as ReactDOM from "react-dom/client";
 import "./styles.css";
-import { ConvergenceEngine, nextSeed } from "./convergence-audio.js";
+import { BURST_COOLDOWN_MS, ConvergenceEngine, nextSeed } from "./convergence-audio.js";
 import { isTypingTarget, usePersistentState, useRecordingClock } from "./hooks.js";
 
 const { useCallback, useEffect, useRef, useState } = React;
@@ -65,6 +65,7 @@ const Convergence = () => {
   const recorderRef = useRef(null);
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
+  const burstCooldownRef = useRef(null);
   const [settings, setSettings] = usePersistentState("web-synth.convergence.settings", DEFAULT_SETTINGS);
   const [seed, setSeed] = usePersistentState("web-synth.convergence.seed", 20260716);
   const [masterMode, setMasterMode] = usePersistentState("web-synth.convergence.masterMode.v2", "BRUTAL");
@@ -79,6 +80,7 @@ const Convergence = () => {
   const [ready, setReady] = useState(false);
   const [drifting, setDrifting] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [burstCooling, setBurstCooling] = useState(false);
   const [scene, setScene] = useState({
     seed,
     scale: "DORIAN",
@@ -225,25 +227,45 @@ const Convergence = () => {
     return () => cancelAnimationFrame(animationRef.current);
   }, [ready]);
 
-  useEffect(() => () => engineRef.current?.destroy(), []);
+  useEffect(() => () => {
+    if (burstCooldownRef.current) window.clearTimeout(burstCooldownRef.current);
+    engineRef.current?.destroy();
+  }, []);
+
+  const startBurstCooldown = useCallback(() => {
+    setBurstCooling(true);
+    if (burstCooldownRef.current) window.clearTimeout(burstCooldownRef.current);
+    burstCooldownRef.current = window.setTimeout(() => {
+      burstCooldownRef.current = null;
+      setBurstCooling(false);
+    }, BURST_COOLDOWN_MS);
+  }, []);
 
   const triggerBurst = useCallback(async () => {
+    if (burstCooling) return;
     const burstSeed = seed;
-    setSeed(nextSeed(seed));
     const engine = await getEngine();
     engine.stopDrift();
     setDrifting(false);
-    engine.burst(settingsRef.current, burstSeed);
-  }, [getEngine, seed, setSeed]);
+    const sceneDna = engine.burst(settingsRef.current, burstSeed);
+    if (sceneDna) {
+      setSeed(nextSeed(burstSeed));
+      startBurstCooldown();
+    }
+  }, [burstCooling, getEngine, seed, setSeed, startBurstCooldown]);
 
   const evolve = useCallback(async () => {
+    if (burstCooling) return;
     const evolved = nextSeed(nextSeed(seed));
-    setSeed(evolved);
     const engine = await getEngine();
     engine.stopDrift();
     setDrifting(false);
-    engine.burst(settingsRef.current, evolved);
-  }, [getEngine, seed, setSeed]);
+    const sceneDna = engine.burst(settingsRef.current, evolved);
+    if (sceneDna) {
+      setSeed(evolved);
+      startBurstCooldown();
+    }
+  }, [burstCooling, getEngine, seed, setSeed, startBurstCooldown]);
 
   const toggleDrift = useCallback(async () => {
     const engine = await getEngine();
@@ -258,6 +280,9 @@ const Convergence = () => {
 
   const stopAll = useCallback(() => {
     engineRef.current?.stopAll();
+    if (burstCooldownRef.current) window.clearTimeout(burstCooldownRef.current);
+    burstCooldownRef.current = null;
+    setBurstCooling(false);
     setDrifting(false);
   }, []);
 
@@ -323,9 +348,9 @@ const Convergence = () => {
 
       <section className="border-b border-zinc-800 bg-[#0b1018]">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-2 px-4 py-3 sm:px-6">
-          <button onClick={triggerBurst} aria-label="Generate convergence burst" className="h-10 rounded bg-[#d8ff3e] px-5 text-xs font-black uppercase text-black hover:bg-[#e5ff7b]">BURST</button>
+          <button onClick={triggerBurst} disabled={burstCooling} aria-label="Generate convergence burst" className="h-10 rounded bg-[#d8ff3e] px-5 text-xs font-black uppercase text-black hover:bg-[#e5ff7b] disabled:cursor-not-allowed disabled:bg-[#788d2b] disabled:text-black/60">BURST</button>
           <button onClick={toggleDrift} aria-pressed={drifting} className={`h-10 rounded border px-5 text-xs font-black uppercase ${drifting ? "border-cyan-400 bg-cyan-400/10 text-cyan-300" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}>{drifting ? "PAUSE DRIFT" : "DRIFT"}</button>
-          <button onClick={evolve} className="h-10 rounded border border-zinc-700 px-4 text-xs font-black uppercase text-zinc-300 hover:border-zinc-500">EVOLVE</button>
+          <button onClick={evolve} disabled={burstCooling} className="h-10 rounded border border-zinc-700 px-4 text-xs font-black uppercase text-zinc-300 hover:border-zinc-500 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700">EVOLVE</button>
           <button onClick={stopAll} aria-label="Stop all convergence voices" className="h-10 rounded border border-zinc-800 px-4 text-xs font-black uppercase text-zinc-500 hover:border-red-500 hover:text-red-400">STOP</button>
           <div className="ml-auto flex items-center gap-2 font-mono text-[10px] text-zinc-500">
             <span>SEED</span>

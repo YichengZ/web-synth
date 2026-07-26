@@ -18,6 +18,7 @@ Every line of DSP (Digital Signal Processing) code and UI logic in this project 
 - **Features:**
   - BURST and evolving DRIFT playback
   - Seed-advancing scenes with 1-4 irregular sub-triggers and randomized stem emphasis
+  - Latest-scene manual polyphony, bounded two-scene DRIFT overlap, source retirement, and burst-rate protection for stable 96kHz playback
   - Bass drop, rise, pulse, bounce, and glide gestures plus varied stab, chord, ribbon, swell, and cascade voices
   - Pitch-related harmonic voices instead of noise-based source layers
   - Seed-randomized per-stem modulated delay, granular delay, and stereo all-pass dispersion

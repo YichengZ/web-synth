@@ -10,6 +10,16 @@ const synths = [
   { name: "CONVERGENCE", path: "/Convergence.html" },
 ];
 
+const getWavPeak = (wav) => {
+  let peak = 0;
+  for (let offset = 44; offset + 2 < wav.length; offset += 3) {
+    let sample = wav[offset] | (wav[offset + 1] << 8) | (wav[offset + 2] << 16);
+    if (sample & 0x800000) sample |= 0xff000000;
+    peak = Math.max(peak, Math.abs(sample / 0x800000));
+  }
+  return peak;
+};
+
 for (const synth of synths) {
   test(`${synth.name} loads without errors or horizontal overflow`, async ({ page }) => {
     const errors = [];
@@ -154,6 +164,16 @@ test("CONVERGENCE recovers after extreme overlapping bursts", async ({ page }, t
       constructor(...args) {
         super(...args);
         window.__testAudioContext = this;
+        window.__activeOscillators = 0;
+        const nativeCreateOscillator = this.createOscillator.bind(this);
+        this.createOscillator = (...values) => {
+          const oscillator = nativeCreateOscillator(...values);
+          window.__activeOscillators += 1;
+          oscillator.addEventListener("ended", () => {
+            window.__activeOscillators -= 1;
+          }, { once: true });
+          return oscillator;
+        };
       }
     };
   });
@@ -161,8 +181,21 @@ test("CONVERGENCE recovers after extreme overlapping bursts", async ({ page }, t
   await page.getByLabel("Density").fill("1");
   await page.getByLabel("Drive").fill("18");
   const burst = page.getByRole("button", { name: "Generate convergence burst" });
-  for (let index = 0; index < 10; index += 1) await burst.click();
+  await page.getByRole("button", { name: "REC WAV", exact: true }).click();
+  for (let index = 0; index < 10; index += 1) {
+    await burst.click();
+    await expect(burst).toBeDisabled();
+    await page.waitForTimeout(430);
+    await expect(burst).toBeEnabled();
+  }
+  const stressDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: /^STOP/ }).first().click();
+  const stressWav = await readFile(await (await stressDownloadPromise).path());
+  expect(getWavPeak(stressWav)).toBeGreaterThan(0.01);
+  expect(getWavPeak(stressWav)).toBeLessThan(0.9);
+  expect(await page.evaluate(() => window.__activeOscillators)).toBeLessThanOrEqual(200);
   await page.getByRole("button", { name: "Stop all convergence voices" }).click();
+  await expect.poll(() => page.evaluate(() => window.__activeOscillators)).toBe(0);
 
   await page.getByRole("button", { name: "REC WAV", exact: true }).click();
   const startTime = await page.evaluate(() => window.__testAudioContext.currentTime);
@@ -176,12 +209,7 @@ test("CONVERGENCE recovers after extreme overlapping bursts", async ({ page }, t
   await page.getByRole("button", { name: /^STOP/ }).first().click();
   const download = await downloadPromise;
   const wav = await readFile(await download.path());
-  let peak = 0;
-  for (let offset = 44; offset + 2 < wav.length; offset += 3) {
-    let sample = wav[offset] | (wav[offset + 1] << 8) | (wav[offset + 2] << 16);
-    if (sample & 0x800000) sample |= 0xff000000;
-    peak = Math.max(peak, Math.abs(sample / 0x800000));
-  }
+  const peak = getWavPeak(wav);
   expect(peak).toBeGreaterThan(0.01);
   expect(peak).toBeLessThan(0.9);
   expect(errors).toEqual([]);
@@ -278,12 +306,7 @@ test.describe("recording", () => {
       expect(sampleRate).toBe(96_000);
       expect(duration).toBeGreaterThan(0.18);
 
-      let peak = 0;
-      for (let offset = 44; offset + 2 < wav.length; offset += 3) {
-        let sample = wav[offset] | (wav[offset + 1] << 8) | (wav[offset + 2] << 16);
-        if (sample & 0x800000) sample |= 0xff000000;
-        peak = Math.max(peak, Math.abs(sample / 0x800000));
-      }
+      const peak = getWavPeak(wav);
       expect(peak).toBeGreaterThan(0.001);
       if (recordingCase.expectCeiling) expect(peak).toBeLessThan(0.9);
 

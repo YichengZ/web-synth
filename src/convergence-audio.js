@@ -12,7 +12,9 @@ const MATERIALS = ["GLASS", "RUBBER", "PLASMA", "ALLOY"];
 const SCALE_NAMES = Object.keys(SCALES);
 const CROSSOVERS = [90, 360, 1800, 6500];
 const OTT_CROSSOVERS = [140, 1050, 4800];
-const MAX_ACTIVE_EFFECT_RACKS = 6;
+const MAX_ACTIVE_SCENES = 2;
+const MAX_ACTIVE_EFFECT_RACKS = 9;
+export const BURST_COOLDOWN_MS = 420;
 const TITAN_GESTURES = ["DROP", "RISE", "PULSE", "BOUNCE", "GLIDE"];
 const KAWAII_GESTURES = ["PLUCK", "STAB", "CHORD", "BEND", "PULSE"];
 const PRISM_GESTURES = ["SHARD", "RIBBON", "SWELL", "CASCADE", "PULSE"];
@@ -384,7 +386,7 @@ const createBrutalMaster = (ctx, workletsReady) => {
   softClipper.curve = createCeilingCurve(0.76, 0);
   softClipper.oversample = "4x";
   hardCeiling.curve = createHardCeilingCurve(-1);
-  hardCeiling.oversample = "4x";
+  hardCeiling.oversample = "none";
   output.gain.value = 0.975;
 
   input.connect(dcFilter);
@@ -688,7 +690,7 @@ const createEarlyFxRack = (engine, dna, stem, destination, startTime, cleanupTim
   const wetTotal = mixes[0] + mixes[1] + mixes[2];
 
   dry.gain.value = clamp(0.9 - wetTotal * 0.34, 0.54, 0.76);
-  output.gain.value = 0.9;
+  output.gain.value = 0.86 / Math.sqrt(Math.max(1, dna.triggers.length));
   modDelay.delayTime.value = randomBetween(rng, profile.modDelay);
   modFeedback.gain.value = 0.06 + rng() * (stem === "titan" ? 0.28 : 0.4);
   modWet.gain.value = mixes[0];
@@ -760,6 +762,7 @@ const createEarlyFxRack = (engine, dna, stem, destination, startTime, cleanupTim
 
   return {
     input,
+    output,
     dominant: ["MOD", "GRAIN", "DISPERSE"][dominant],
     mix: { mod: mixes[0], grain: mixes[1], disperse: mixes[2] },
     grainSettings,
@@ -1256,6 +1259,9 @@ export class ConvergenceEngine {
     this.onRecordLimit = onRecordLimit;
     this.activeSources = new Set();
     this.activeEffects = new Set();
+    this.activeScenes = [];
+    this.schedulingScene = null;
+    this.lastBurstAt = Number.NEGATIVE_INFINITY;
     this.driftTimer = null;
     this.masterMode = "BRUTAL";
     this.masterDrive = 12;
@@ -1414,12 +1420,64 @@ export class ConvergenceEngine {
   }
 
   registerSource(source, stopTime) {
+    const scene = this.schedulingScene;
     this.activeSources.add(source);
-    source.onended = () => this.activeSources.delete(source);
+    scene?.sources.add(source);
+    source.onended = () => {
+      this.activeSources.delete(source);
+      scene?.sources.delete(source);
+      this.finalizeScene(scene);
+    };
     source.stop(stopTime);
   }
 
+  beginScene(sceneLimit = MAX_ACTIVE_SCENES) {
+    while (this.activeScenes.length >= sceneLimit) {
+      this.retireScene(this.activeScenes[0]);
+    }
+    const scene = {
+      sources: new Set(),
+      effects: new Set(),
+      outputGains: new Set(),
+      timers: new Set(),
+      retired: false,
+    };
+    this.activeScenes.push(scene);
+    return scene;
+  }
+
+  finalizeScene(scene) {
+    if (!scene || scene.retired || scene.sources.size || scene.effects.size || scene.timers.size) return;
+    scene.outputGains.clear();
+    const index = this.activeScenes.indexOf(scene);
+    if (index >= 0) this.activeScenes.splice(index, 1);
+  }
+
+  retireScene(scene) {
+    if (!scene || scene.retired) return;
+    scene.retired = true;
+    const now = this.ctx?.currentTime || 0;
+    const stopTime = now + 0.018;
+    scene.outputGains.forEach((output) => {
+      output.gain.cancelScheduledValues(now);
+      output.gain.setTargetAtTime(0, now, 0.004);
+    });
+    scene.sources.forEach((source) => {
+      try { source.stop(stopTime); } catch (error) { /* already stopped */ }
+      this.activeSources.delete(source);
+    });
+    const effectCleanups = [...scene.effects];
+    window.setTimeout(() => effectCleanups.forEach((cleanup) => cleanup()), 24);
+    scene.timers.forEach((timer) => window.clearTimeout(timer));
+    scene.sources.clear();
+    scene.outputGains.clear();
+    scene.timers.clear();
+    const index = this.activeScenes.indexOf(scene);
+    if (index >= 0) this.activeScenes.splice(index, 1);
+  }
+
   registerEffectGraph(nodes, cleanupTime) {
+    const scene = this.schedulingScene;
     let timer = null;
     const cleanup = () => {
       if (timer !== null) window.clearTimeout(timer);
@@ -1427,6 +1485,8 @@ export class ConvergenceEngine {
         try { node.disconnect(); } catch (error) { /* already disconnected */ }
       });
       this.activeEffects.delete(cleanup);
+      scene?.effects.delete(cleanup);
+      this.finalizeScene(scene);
     };
     const delay = Math.max(0, (cleanupTime - this.ctx.currentTime) * 1000);
     while (this.activeEffects.size >= MAX_ACTIVE_EFFECT_RACKS) {
@@ -1434,37 +1494,62 @@ export class ConvergenceEngine {
       oldestCleanup?.();
     }
     this.activeEffects.add(cleanup);
+    scene?.effects.add(cleanup);
     timer = window.setTimeout(cleanup, delay);
   }
 
   signalVoice(stem, time, intensity) {
+    const scene = this.schedulingScene;
     const delay = Math.max(0, (time - this.ctx.currentTime) * 1000);
-    window.setTimeout(() => this.onVoice?.({ stem, intensity, time }), delay);
+    const timer = window.setTimeout(() => {
+      scene?.timers.delete(timer);
+      if (!scene?.retired) this.onVoice?.({ stem, intensity, time });
+      this.finalizeScene(scene);
+    }, delay);
+    scene?.timers.add(timer);
   }
 
-  scheduleScene(settings, seed, startTime = this.ctx.currentTime + 0.035) {
+  scheduleScene(
+    settings,
+    seed,
+    startTime = this.ctx.currentTime + 0.035,
+    sceneLimit = MAX_ACTIVE_SCENES,
+  ) {
     const dna = createSceneDna(seed, settings);
-    const sceneEffects = createSceneEffects(this, dna, startTime);
-    dna.triggers.forEach((trigger) => {
-      const triggerTime = startTime + trigger.offset;
-      const titan = spawnTitan(this, dna, triggerTime + trigger.timing.titan, trigger, sceneEffects.titan.input);
-      const motif = spawnKawaii(
-        this,
-        dna,
-        triggerTime + trigger.timing.kawaii,
-        titan,
-        trigger,
-        sceneEffects.kawaii.input,
-      );
-      spawnPrism(
-        this,
-        dna,
-        triggerTime + trigger.timing.prism,
-        motif,
-        trigger,
-        sceneEffects.prism.input,
-      );
-    });
+    const scene = this.beginScene(sceneLimit);
+    this.schedulingScene = scene;
+    let sceneEffects;
+    try {
+      sceneEffects = createSceneEffects(this, dna, startTime);
+      scene.outputGains.add(sceneEffects.titan.output);
+      scene.outputGains.add(sceneEffects.kawaii.output);
+      scene.outputGains.add(sceneEffects.prism.output);
+      dna.triggers.forEach((trigger) => {
+        const triggerTime = startTime + trigger.offset;
+        const titan = spawnTitan(this, dna, triggerTime + trigger.timing.titan, trigger, sceneEffects.titan.input);
+        const motif = spawnKawaii(
+          this,
+          dna,
+          triggerTime + trigger.timing.kawaii,
+          titan,
+          trigger,
+          sceneEffects.kawaii.input,
+        );
+        spawnPrism(
+          this,
+          dna,
+          triggerTime + trigger.timing.prism,
+          motif,
+          trigger,
+          sceneEffects.prism.input,
+        );
+      });
+    } catch (error) {
+      this.retireScene(scene);
+      throw error;
+    } finally {
+      this.schedulingScene = null;
+    }
     const primaryTrigger = dna.triggers[0];
     this.onScene?.({
       seed: dna.seed,
@@ -1486,7 +1571,10 @@ export class ConvergenceEngine {
   }
 
   burst(settings, seed) {
-    return this.scheduleScene(settings, seed);
+    const now = performance.now();
+    if (now - this.lastBurstAt < BURST_COOLDOWN_MS) return null;
+    this.lastBurstAt = now;
+    return this.scheduleScene(settings, seed, this.ctx.currentTime + 0.035, 1);
   }
 
   startDrift(settingsProvider, seed) {
@@ -1511,12 +1599,13 @@ export class ConvergenceEngine {
 
   stopAll() {
     this.stopDrift();
+    this.lastBurstAt = Number.NEGATIVE_INFINITY;
+    [...this.activeScenes].forEach((scene) => this.retireScene(scene));
     const stopTime = this.ctx ? this.ctx.currentTime + 0.035 : 0;
     this.activeSources.forEach((source) => {
       try { source.stop(stopTime); } catch (error) { /* already stopped */ }
     });
     this.activeSources.clear();
-    [...this.activeEffects].forEach((cleanup) => cleanup());
   }
 
   getMeterState() {
