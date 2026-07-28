@@ -9,6 +9,7 @@ export default defineConfig({
   testDir: "./tests",
   timeout: 30_000,
   fullyParallel: true,
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",

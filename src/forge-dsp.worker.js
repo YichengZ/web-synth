@@ -26,6 +26,22 @@ const report = (id, phase, progress) => {
   self.postMessage({ id, type: "progress", phase, progress });
 };
 
+const applyEdgeFade = (left, right, sampleRate, milliseconds = 35) => {
+  const fadeLength = Math.min(
+    Math.floor(left.length / 2),
+    Math.max(1, Math.floor(sampleRate * milliseconds / 1000)),
+  );
+  for (let index = 0; index < fadeLength; index += 1) {
+    const phase = (index + 1) / fadeLength;
+    const gain = Math.sin(phase * Math.PI * 0.5) ** 2;
+    const end = left.length - 1 - index;
+    left[index] *= gain;
+    right[index] *= gain;
+    left[end] *= gain;
+    right[end] *= gain;
+  }
+};
+
 const tonalExtract = (id, left, right, sampleRate, options = {}) => {
   const fftSize = 4096;
   const hopSize = 1024;
@@ -58,32 +74,36 @@ const tonalExtract = (id, left, right, sampleRate, options = {}) => {
     if (frameIndex % 24 === 0) report(id, "analyse", frameIndex / frameCount);
   }
 
-  const amount = clamp(Number(options.amount) || 0.7, 0, 1);
-  const floor = dbToGain(Number(options.floorDb) || -24);
-  const residualMix = clamp(Number(options.residualMix) || 0.16, 0, 0.5);
+  const amount = clamp(Number(options.amount) || 0.78, 0, 1);
+  const floor = dbToGain(Number(options.floorDb) || -32);
+  const residualMix = clamp(Number(options.residualMix) || 0.12, 0, 0.5);
   const lowProtectHz = Math.max(0, Number(options.lowProtectHz) || 120);
-  const mask = new Float32Array(magnitude.length);
-  const timeValues = new Float32Array(9);
-  const frequencyValues = new Float32Array(7);
+  const timeRadius = clamp(Math.round(Number(options.timeRadius) || 8), 4, 16);
+  const frequencyRadius = clamp(Math.round(Number(options.frequencyRadius) || 5), 3, 10);
+  const maskPower = clamp(Number(options.maskPower) || 4, 2, 6);
+  const residualBias = clamp(Number(options.residualBias) || 1.35, 1, 2.5);
+  const rawMask = new Float32Array(magnitude.length);
+  const timeValues = new Float32Array(timeRadius * 2 + 1);
+  const frequencyValues = new Float32Array(frequencyRadius * 2 + 1);
 
   for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
     for (let bin = 0; bin < binCount; bin += 1) {
       let timeLength = 0;
-      for (let offset = -4; offset <= 4; offset += 1) {
+      for (let offset = -timeRadius; offset <= timeRadius; offset += 1) {
         const neighbor = clamp(frameIndex + offset, 0, frameCount - 1);
         timeValues[timeLength] = magnitude[neighbor * binCount + bin];
         timeLength += 1;
       }
       const tonal = medianSmall(timeValues, timeLength);
       let frequencyLength = 0;
-      for (let offset = -3; offset <= 3; offset += 1) {
+      for (let offset = -frequencyRadius; offset <= frequencyRadius; offset += 1) {
         const neighbor = clamp(bin + offset, 0, binCount - 1);
         frequencyValues[frequencyLength] = magnitude[frameIndex * binCount + neighbor];
         frequencyLength += 1;
       }
       const residual = medianSmall(frequencyValues, frequencyLength);
-      const tonalPower = tonal * tonal;
-      const residualPower = residual * residual * 1.18;
+      const tonalPower = tonal ** maskPower;
+      const residualPower = (residual * residualBias) ** maskPower;
       const tonalMask = tonalPower / (tonalPower + residualPower + EPSILON);
       const transientMask = residualPower / (tonalPower + residualPower + EPSILON);
       const frequency = bin * sampleRate / fftSize;
@@ -92,13 +112,30 @@ const tonalExtract = (id, left, right, sampleRate, options = {}) => {
         : 0;
       const extracted = Math.max(
         floor,
-        Math.sqrt(tonalMask),
-        transientMask * residualMix,
+        tonalMask ** (1 / maskPower),
+        transientMask ** (1 / maskPower) * residualMix,
         lowProtection,
       );
-      mask[frameIndex * binCount + bin] = 1 - amount * (1 - extracted);
+      rawMask[frameIndex * binCount + bin] = 1 - amount * (1 - extracted);
     }
     if (frameIndex % 16 === 0) report(id, "mask", frameIndex / frameCount);
+  }
+
+  const mask = new Float32Array(rawMask.length);
+  for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+    const previousFrame = Math.max(0, frameIndex - 1);
+    const nextFrame = Math.min(frameCount - 1, frameIndex + 1);
+    for (let bin = 0; bin < binCount; bin += 1) {
+      const previousBin = Math.max(0, bin - 1);
+      const nextBin = Math.min(binCount - 1, bin + 1);
+      mask[frameIndex * binCount + bin] = (
+        rawMask[frameIndex * binCount + bin] * 0.5
+        + rawMask[previousFrame * binCount + bin] * 0.16
+        + rawMask[nextFrame * binCount + bin] * 0.16
+        + rawMask[frameIndex * binCount + previousBin] * 0.09
+        + rawMask[frameIndex * binCount + nextBin] * 0.09
+      );
+    }
   }
 
   const output = [new Float32Array(left.length), new Float32Array(right.length)];
@@ -137,11 +174,12 @@ const tonalExtract = (id, left, right, sampleRate, options = {}) => {
     output[0][index] = finiteSample(output[0][index] * scale, 4);
     output[1][index] = finiteSample(output[1][index] * scale, 4);
   }
+  applyEdgeFade(output[0], output[1], sampleRate, 28);
   return output;
 };
 
 const processColorAndTransient = (left, right, sampleRate, options = {}) => {
-  const drive = dbToGain(clamp(Number(options.driveDb) || 6, 0, 18));
+  const drive = dbToGain(clamp(Number(options.driveDb) || 4, 0, 12));
   const colorMix = clamp(Number(options.colorMix) || 0.62, 0, 1);
   const transientAmount = clamp(Number(options.transient) || 0.8, 0, 2);
   const fastAttack = Math.exp(-1 / (sampleRate * 0.0004));
@@ -161,8 +199,8 @@ const processColorAndTransient = (left, right, sampleRate, options = {}) => {
     fast = linked + fastCoefficient * (fast - linked);
     slow = linked + slowCoefficient * (slow - linked);
     const transient = Math.max(0, fast - slow);
-    const target = Math.min(2.1, 1 + transientAmount * transient / (slow + 0.06));
-    smoothedGain += (target - smoothedGain) * 0.18;
+    const target = Math.min(1.38, 1 + transientAmount * transient / (slow + 0.09));
+    smoothedGain += (target - smoothedGain) * 0.08;
     const fade = Math.min(1, index / fadeLength, (left.length - 1 - index) / fadeLength);
     for (let channel = 0; channel < 2; channel += 1) {
       const source = channel === 0 ? left[index] : right[index];
@@ -295,42 +333,155 @@ const measureSpectralFlatness = (left, right) => {
   return frames ? flatnessTotal / frames : 0;
 };
 
-const finishMaster = (left, right, sampleRate, options = {}) => {
-  processColorAndTransient(left, right, sampleRate, {
-    driveDb: 5 + clamp(Number(options.violence) || 0.8, 0, 1) * 7,
-    colorMix: 0.68,
-    transient: 0.72 + clamp(Number(options.violence) || 0.8, 0, 1) * 0.5,
-  });
-  const targetLufs = Number(options.targetLufs) || -8.5;
-  let loudness = measureLoudness(left, right, sampleRate);
-  const firstGain = dbToGain(clamp(targetLufs - loudness, -12, 12));
+const removeDc = (left, right) => {
+  let meanLeft = 0;
+  let meanRight = 0;
   for (let index = 0; index < left.length; index += 1) {
-    left[index] = Math.tanh(left[index] * firstGain * 1.35) / Math.tanh(1.35);
-    right[index] = Math.tanh(right[index] * firstGain * 1.35) / Math.tanh(1.35);
+    meanLeft += left[index];
+    meanRight += right[index];
   }
+  meanLeft /= Math.max(1, left.length);
+  meanRight /= Math.max(1, right.length);
+  for (let index = 0; index < left.length; index += 1) {
+    left[index] = finiteSample(left[index] - meanLeft, 2);
+    right[index] = finiteSample(right[index] - meanRight, 2);
+  }
+};
+
+const applyLookaheadLimiter = (left, right, sampleRate, {
+  ceilingDb = -1.3,
+  lookaheadMs = 3,
+  releaseMs = 95,
+} = {}) => {
+  const ceiling = dbToGain(ceilingDb);
+  const lookahead = Math.max(1, Math.floor(sampleRate * lookaheadMs / 1000));
+  const release = Math.exp(-1 / Math.max(1, sampleRate * releaseMs / 1000));
+  const linked = new Float32Array(left.length);
+  const deque = new Int32Array(left.length);
+  let head = 0;
+  let tail = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    linked[index] = Math.max(Math.abs(left[index]), Math.abs(right[index]));
+  }
+  const push = (index) => {
+    while (tail > head && linked[deque[tail - 1]] <= linked[index]) tail -= 1;
+    deque[tail] = index;
+    tail += 1;
+  };
+  for (let index = 0; index <= Math.min(left.length - 1, lookahead); index += 1) push(index);
+  let gain = 1;
+  for (let index = 0; index < left.length; index += 1) {
+    while (tail > head && deque[head] < index) head += 1;
+    const entering = index + lookahead;
+    if (entering < left.length && entering > lookahead) push(entering);
+    const peak = tail > head ? linked[deque[head]] : linked[index];
+    const target = Math.min(1, ceiling / Math.max(EPSILON, peak));
+    gain = target < gain ? target : target + release * (gain - target);
+    left[index] = finiteSample(left[index] * gain, 2);
+    right[index] = finiteSample(right[index] * gain, 2);
+  }
+};
+
+const applyLinkedCompressor = (left, right, sampleRate, {
+  thresholdDb = -20,
+  ratio = 3.4,
+  attackMs = 0.35,
+  releaseMs = 135,
+  makeupDb = 6,
+  mix = 0.34,
+} = {}) => {
+  const attack = Math.exp(-1 / Math.max(1, sampleRate * attackMs / 1000));
+  const release = Math.exp(-1 / Math.max(1, sampleRate * releaseMs / 1000));
+  let envelope = 0;
+  let gain = 1;
+  for (let index = 0; index < left.length; index += 1) {
+    const linked = Math.max(Math.abs(left[index]), Math.abs(right[index]));
+    const coefficient = linked > envelope ? attack : release;
+    envelope = linked + coefficient * (envelope - linked);
+    const overDb = Math.max(0, gainToDb(envelope) - thresholdDb);
+    const reductionDb = overDb * (1 - 1 / ratio);
+    const targetGain = dbToGain(-reductionDb);
+    gain += (targetGain - gain) * (targetGain < gain ? 0.42 : 0.008);
+    const parallelGain = gain * dbToGain(makeupDb);
+    const mixedGain = 1 - mix + parallelGain * mix;
+    left[index] = finiteSample(left[index] * mixedGain, 2);
+    right[index] = finiteSample(right[index] * mixedGain, 2);
+  }
+};
+
+const measureDiscontinuity = (left, right) => {
+  let maxSampleDelta = 0;
+  let clickCount = 0;
+  for (const channel of [left, right]) {
+    for (let index = 1; index < channel.length - 1; index += 1) {
+      const incoming = channel[index] - channel[index - 1];
+      const outgoing = channel[index + 1] - channel[index];
+      maxSampleDelta = Math.max(maxSampleDelta, Math.abs(incoming));
+      if (
+        Math.abs(incoming) > 0.32
+        && Math.abs(incoming + outgoing) < Math.abs(incoming) * 0.3
+      ) {
+        clickCount += 1;
+      }
+    }
+  }
+  return { maxSampleDelta, clickCount };
+};
+
+const finishMaster = (left, right, sampleRate, options = {}) => {
+  const violence = clamp(Number(options.violence) || 0.8, 0, 1);
+  processColorAndTransient(left, right, sampleRate, {
+    driveDb: 1.5 + violence * 2.5,
+    colorMix: 0.18 + violence * 0.12,
+    transient: 0.16 + violence * 0.16,
+  });
+  removeDc(left, right);
+  applyLinkedCompressor(left, right, sampleRate);
+  const targetLufs = Number(options.targetLufs) || -9.5;
+  let loudness = measureLoudness(left, right, sampleRate);
+  const firstGain = dbToGain(clamp(targetLufs - loudness, -6, 18));
+  for (let index = 0; index < left.length; index += 1) {
+    left[index] = finiteSample(left[index] * firstGain, 2);
+    right[index] = finiteSample(right[index] * firstGain, 2);
+  }
+  applyLookaheadLimiter(left, right, sampleRate, { ceilingDb: -1.3 });
   loudness = measureLoudness(left, right, sampleRate);
   const truePeak = measureTruePeak(left, right);
-  const ceiling = dbToGain(-1);
+  const ceiling = dbToGain(-1.2);
   const finalGain = Math.min(
-    dbToGain(clamp(targetLufs - loudness, -3, 3)),
+    dbToGain(clamp(targetLufs - loudness, -1.5, 1.5)),
     ceiling / Math.max(EPSILON, truePeak),
   );
+  for (let index = 0; index < left.length; index += 1) {
+    left[index] = finiteSample(left[index] * finalGain, 2);
+    right[index] = finiteSample(right[index] * finalGain, 2);
+  }
+  applyLookaheadLimiter(left, right, sampleRate, { ceilingDb: -1.2, releaseMs: 120 });
+  const safetyPeak = measureTruePeak(left, right);
+  const safetyTrim = Math.min(1, ceiling / Math.max(EPSILON, safetyPeak));
+  if (safetyTrim < 1) {
+    for (let index = 0; index < left.length; index += 1) {
+      left[index] *= safetyTrim;
+      right[index] *= safetyTrim;
+    }
+  }
+  applyEdgeFade(left, right, sampleRate, 45);
+  loudness = measureLoudness(left, right, sampleRate);
+  const measuredPeak = measureTruePeak(left, right);
   let dcLeft = 0;
   let dcRight = 0;
   for (let index = 0; index < left.length; index += 1) {
-    left[index] = clamp(finiteSample(left[index] * finalGain), -ceiling, ceiling);
-    right[index] = clamp(finiteSample(right[index] * finalGain), -ceiling, ceiling);
     dcLeft += left[index];
     dcRight += right[index];
   }
-  loudness = measureLoudness(left, right, sampleRate);
-  const measuredPeak = measureTruePeak(left, right);
   const dc = Math.max(Math.abs(dcLeft / left.length), Math.abs(dcRight / right.length));
+  const discontinuity = measureDiscontinuity(left, right);
   return {
     lufs: loudness,
     truePeakDb: gainToDb(measuredPeak),
     dcDb: gainToDb(dc),
     spectralFlatness: measureSpectralFlatness(left, right),
+    ...discontinuity,
   };
 };
 
@@ -382,6 +533,8 @@ self.onmessage = (event) => {
       processColorAndTransient(outputLeft, outputRight, sampleRate, options);
     } else if (operation === "cleanup") {
       [outputLeft, outputRight] = tonalExtract(id, left, right, sampleRate, options);
+    } else if (operation === "color") {
+      processColorAndTransient(outputLeft, outputRight, sampleRate, options);
     } else if (operation === "master") {
       [outputLeft, outputRight] = tonalExtract(id, left, right, sampleRate, {
         amount: options.tonalAmount,

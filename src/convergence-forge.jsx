@@ -59,16 +59,20 @@ const AssetRow = ({
   onPlay,
   onLoop,
   onDownload,
-}) => (
-  <div className="grid min-h-20 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-zinc-800 px-3 py-3 last:border-b-0 sm:grid-cols-[auto_minmax(0,1fr)_repeat(4,minmax(62px,auto))_auto]">
+}) => {
+  const stopping = active && !recording;
+  return (
+    <div className="grid min-h-20 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-zinc-800 px-3 py-3 last:border-b-0 sm:grid-cols-[auto_minmax(0,1fr)_repeat(4,minmax(62px,auto))_auto]">
     <button
       type="button"
       onClick={onPlay}
-      aria-label={`${recording ? "Trigger" : "Play"} ${asset.id}`}
-      title={recording ? "Trigger into REC SET" : "Play asset"}
+      aria-label={`${recording ? "Trigger" : stopping ? "Stop" : "Play"} ${asset.id}`}
+      title={recording ? "Trigger into REC SET" : stopping ? "Stop asset" : "Play asset"}
       className={`flex h-9 w-9 items-center justify-center rounded border transition-colors ${active ? "border-[#d8ff3e] bg-[#d8ff3e] text-black" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}
     >
-      <Play size={15} fill="currentColor" />
+      {stopping
+        ? <Square size={13} fill="currentColor" />
+        : <Play size={15} fill="currentColor" />}
     </button>
     <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2">
@@ -105,7 +109,8 @@ const AssetRow = ({
       <Download size={15} />
     </button>
   </div>
-);
+  );
+};
 
 const ConvergenceForge = () => {
   const testMode = useMemo(
@@ -381,7 +386,13 @@ const ConvergenceForge = () => {
                 active={activeIds.includes(asset.id)}
                 recording={recording}
                 loop={Boolean(loops[asset.id])}
-                onPlay={() => playerRef.current.play(asset, { loop: Boolean(loops[asset.id]) }).catch((playError) => setError(playError.message))}
+                onPlay={() => {
+                  if (activeIds.includes(asset.id) && !recording) {
+                    playerRef.current.stopAsset(asset.id);
+                    return;
+                  }
+                  playerRef.current.play(asset, { loop: Boolean(loops[asset.id]) }).catch((playError) => setError(playError.message));
+                }}
                 onLoop={() => setLoops((current) => ({ ...current, [asset.id]: !current[asset.id] }))}
                 onDownload={() => downloadBlob(asset.wavBlob, asset.filename)}
               />
@@ -427,10 +438,10 @@ const ConvergenceForge = () => {
           <section className="px-5 py-5">
             <h2 className="mb-4 text-[10px] font-black uppercase text-zinc-400">Signal Path</h2>
             <div className="grid gap-2 font-mono text-[9px] text-zinc-500">
-              <div className="border-l-2 border-cyan-400/50 pl-3 py-1">SOURCE / STFT TONAL</div>
-              <div className="border-l-2 border-pink-400/50 pl-3 py-1">DOPPLER / FLOOR PATH</div>
-              <div className="border-l-2 border-orange-400/50 pl-3 py-1">5-BAND / COLOR</div>
-              <div className="border-l-2 border-[#d8ff3e]/50 pl-3 py-1">TRANSIENT / -1 DBTP</div>
+              <div className="border-l-2 border-cyan-400/50 pl-3 py-1">TONAL ×2 / L3 PRE</div>
+              <div className="border-l-2 border-pink-400/50 pl-3 py-1">DOPPLER RAMPS / FLOOR</div>
+              <div className="border-l-2 border-orange-400/50 pl-3 py-1">L3 / COLOR / L3</div>
+              <div className="border-l-2 border-[#d8ff3e]/50 pl-3 py-1">TONAL / LOOKAHEAD / -1.2</div>
             </div>
           </section>
         </aside>

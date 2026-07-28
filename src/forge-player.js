@@ -108,15 +108,27 @@ export class ForgeAssetPlayer {
     this.onState?.({ activeIds: [...this.active].map((item) => item.assetId), recording: this.recording });
   }
 
-  stopAll() {
-    for (const voice of this.active) {
+  stopMatching(predicate) {
+    for (const voice of [...this.active]) {
+      if (!predicate(voice)) continue;
       const now = voice.context.currentTime;
       voice.gain.gain.cancelScheduledValues(now);
       voice.gain.gain.setTargetAtTime(0, now, 0.006);
       try { voice.source.stop(now + 0.035); } catch (error) { /* already stopped */ }
+      this.active.delete(voice);
     }
-    this.active.clear();
-    this.onState?.({ activeIds: [], recording: this.recording });
+    this.onState?.({
+      activeIds: [...this.active].map((item) => item.assetId),
+      recording: this.recording,
+    });
+  }
+
+  stopAsset(assetId) {
+    this.stopMatching((voice) => voice.assetId === assetId);
+  }
+
+  stopAll() {
+    this.stopMatching(() => true);
   }
 
   async startCapture() {

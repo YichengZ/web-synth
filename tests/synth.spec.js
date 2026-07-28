@@ -21,6 +21,20 @@ const getWavPeak = (wav) => {
   return peak;
 };
 
+const getWavMaxDelta = (wav) => {
+  let maxDelta = 0;
+  const previous = [0, 0];
+  for (let offset = 44, channel = 0; offset + 2 < wav.length; offset += 3) {
+    let sample = wav[offset] | (wav[offset + 1] << 8) | (wav[offset + 2] << 16);
+    if (sample & 0x800000) sample |= 0xff000000;
+    const value = sample / 0x800000;
+    maxDelta = Math.max(maxDelta, Math.abs(value - previous[channel]));
+    previous[channel] = value;
+    channel = channel ? 0 : 1;
+  }
+  return maxDelta;
+};
+
 for (const synth of synths) {
   test(`${synth.name} loads without errors or horizontal overflow`, async ({ page }) => {
     const errors = [];
@@ -133,12 +147,12 @@ test("CONVERGENCE preview clock stays real time and suspends when idle", async (
   await page.goto("/Convergence.html");
   await page.getByLabel("Density").fill("1");
   await page.getByRole("button", { name: "Generate convergence burst" }).click();
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(2500);
   const start = await page.evaluate(() => ({
     audio: window.__testAudioContext.currentTime,
     wall: performance.now(),
   }));
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(4000);
   const ratio = await page.evaluate(({ audio, wall }) => (
     (window.__testAudioContext.currentTime - audio) / ((performance.now() - wall) / 1000)
   ), start);
@@ -170,12 +184,16 @@ test("CONVERGENCE FORGE completes, previews, downloads, and captures at 96 kHz",
   const directWav = await readFile(await (await directDownload).path());
   expect(directWav.readUInt32LE(24)).toBe(96_000);
   expect(directWav.readUInt16LE(34)).toBe(24);
-  expect(getWavPeak(directWav)).toBeLessThan(0.9);
+  expect(getWavPeak(directWav)).toBeLessThan(0.88);
+  expect(getWavMaxDelta(directWav)).toBeLessThan(0.82);
 
   await page.getByRole("button", { name: "Play master-01" }).click();
+  await expect(page.getByRole("button", { name: "Stop master-01" })).toBeVisible();
+  await page.getByRole("button", { name: "Stop master-01" }).click();
+  await expect(page.getByRole("button", { name: "Play master-01" })).toBeVisible();
   await page.getByRole("button", { name: "REC SET" }).click();
   await page.getByRole("button", { name: "Trigger master-01" }).click();
-  await page.waitForTimeout(350);
+  await page.waitForTimeout(1000);
   const captureDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: /^STOP \d{2}:\d{2}$/ }).click();
   const captureWav = await readFile(await (await captureDownload).path());

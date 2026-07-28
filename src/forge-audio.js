@@ -87,16 +87,6 @@ const makeSaturationCurve = (drive = 2.5, mix = 0.7) => {
   return curve;
 };
 
-const makeCeilingCurve = (ceilingDb = -1) => {
-  const ceiling = dbToGain(ceilingDb);
-  const curve = new Float32Array(32768);
-  for (let index = 0; index < curve.length; index += 1) {
-    const input = index * 2 / (curve.length - 1) - 1;
-    curve[index] = clamp(input, -ceiling, ceiling);
-  }
-  return curve;
-};
-
 const createFilter = (context, type, frequency, q = Math.SQRT1_2) => {
   const filter = context.createBiquadFilter();
   filter.type = type;
@@ -121,7 +111,7 @@ const scaleFrequency = (dna, degree, octave = 0) => {
 const scheduleEnvelope = (gain, start, attack, peak, hold, release) => {
   gain.setValueAtTime(0.0001, start);
   gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), start + attack);
-  gain.setValueAtTime(Math.max(0.0002, peak * 0.82), start + attack + hold);
+  gain.linearRampToValueAtTime(Math.max(0.0002, peak * 0.82), start + attack + hold);
   gain.exponentialRampToValueAtTime(0.0001, start + attack + hold + release);
 };
 
@@ -285,7 +275,11 @@ const renderSource = async (config, dna, seed, index, signal) => {
   rightAllpass.connect(merge, 0, 1);
   merge.connect(disperseWet);
   disperseWet.connect(highpass);
-  connectSeries([highpass, saturation, compressor, master, context.destination]);
+  const preColorLimiter = createFiveBandLimiter(context, highpass, {
+    thresholdOffset: -1,
+    sumGain: 0.72,
+  });
+  connectSeries([preColorLimiter, saturation, compressor, master, context.destination]);
   scheduleSourceScene(context, sourceBus, dna, rng, duration, config);
   const buffer = await context.startRendering();
   assertActive(signal);
@@ -324,6 +318,7 @@ const automateDopplerPath = ({
   const listenerHeight = 1.65;
   const approachPower = 0.72 + rng() * 0.9;
   const awayPower = 0.72 + rng() * 1.15;
+  const floorRatio = 0.12 + rng() * 0.08;
   const steps = 72;
   for (let step = 0; step <= steps; step += 1) {
     const ratio = step / steps;
@@ -342,18 +337,22 @@ const automateDopplerPath = ({
     );
     const time = ratio * duration;
     const directLevel = clamp(3.4 / Math.sqrt(distance + 1), 0.13, 0.94);
-    const floorLevel = directLevel * (0.12 + rng() * 0.08);
-    delay.delayTime.setValueAtTime(distance / SPEED_OF_SOUND, time);
-    reflectionDelay.delayTime.setValueAtTime(reflectedDistance / SPEED_OF_SOUND, time);
-    gain.gain.setValueAtTime(directLevel, time);
-    reflectionGain.gain.setValueAtTime(floorLevel, time);
+    const floorLevel = directLevel * floorRatio;
     const panValue = clamp((x / (Math.abs(x) + lateral)) * direction, -0.92, 0.92);
-    pan.pan.setValueAtTime(panValue, time);
-    reflectionPan.pan.setValueAtTime(clamp(panValue * 0.78, -0.8, 0.8), time);
-    filter.frequency.setValueAtTime(
-      clamp(18000 * Math.exp(-distance / 150), 2400, 18000),
-      time,
-    );
+    const airFrequency = clamp(18000 * Math.exp(-distance / 150), 2400, 18000);
+    const values = [
+      [delay.delayTime, distance / SPEED_OF_SOUND],
+      [reflectionDelay.delayTime, reflectedDistance / SPEED_OF_SOUND],
+      [gain.gain, directLevel],
+      [reflectionGain.gain, floorLevel],
+      [pan.pan, panValue],
+      [reflectionPan.pan, clamp(panValue * 0.78, -0.8, 0.8)],
+      [filter.frequency, airFrequency],
+    ];
+    for (const [parameter, value] of values) {
+      if (step === 0) parameter.setValueAtTime(value, time);
+      else parameter.linearRampToValueAtTime(value, time);
+    }
   }
 };
 
@@ -419,7 +418,6 @@ const renderWhoosh = async (config, dna, sources, seed, index, signal) => {
   const envelope = context.createGain();
   const compressor = context.createDynamicsCompressor();
   const color = context.createWaveShaper();
-  const ceiling = context.createWaveShaper();
   envelope.gain.setValueAtTime(0.0001, 0);
   envelope.gain.linearRampToValueAtTime(0.88, 0.08);
   envelope.gain.setValueAtTime(0.88, Math.max(0.1, duration - 0.14));
@@ -429,10 +427,13 @@ const renderWhoosh = async (config, dna, sources, seed, index, signal) => {
   compressor.ratio.value = 4;
   compressor.attack.value = 0.006;
   compressor.release.value = 0.16;
-  color.curve = makeSaturationCurve(1.8 + config.violence * 1.6, 0.45);
+  color.curve = makeSaturationCurve(1.45 + config.violence * 1.1, 0.3);
   color.oversample = "2x";
-  ceiling.curve = makeCeilingCurve(-1.4);
-  connectSeries([sum, compressor, color, ceiling, envelope, context.destination]);
+  const preColorLimiter = createFiveBandLimiter(context, sum, {
+    thresholdOffset: 0,
+    sumGain: 0.7,
+  });
+  connectSeries([preColorLimiter, color, compressor, envelope, context.destination]);
   const buffer = await context.startRendering();
   assertActive(signal);
   return {
@@ -463,6 +464,32 @@ const createBandPath = (context, input, bandIndex) => {
   input.connect(filters[0]);
   connectSeries(filters);
   return filters.at(-1);
+};
+
+const createFiveBandLimiter = (context, input, {
+  thresholdOffset = 0,
+  sumGain = 0.72,
+  makeup = [1.02, 1, 0.96, 0.99, 1.02],
+} = {}) => {
+  const sum = context.createGain();
+  const thresholds = [-13, -15.5, -17, -15, -13.5];
+  const releases = [0.28, 0.21, 0.14, 0.085, 0.052];
+  thresholds.forEach((threshold, bandIndex) => {
+    const band = createBandPath(context, input, bandIndex);
+    const limiter = context.createDynamicsCompressor();
+    const bandMakeup = context.createGain();
+    limiter.threshold.value = threshold + thresholdOffset;
+    limiter.knee.value = 2;
+    limiter.ratio.value = bandIndex === 2 ? 12 : 16;
+    limiter.attack.value = bandIndex < 2 ? 0.004 : 0.0015;
+    limiter.release.value = releases[bandIndex];
+    bandMakeup.gain.value = makeup[bandIndex] ?? 1;
+    band.connect(limiter);
+    limiter.connect(bandMakeup);
+    bandMakeup.connect(sum);
+  });
+  sum.gain.value = sumGain;
+  return sum;
 };
 
 const renderLayerMix = async (config, dna, whooshes, seed, duration, signal) => {
@@ -542,48 +569,35 @@ const renderFinalBus = async (config, buffer, signal) => {
   assertActive(signal);
   const context = new OfflineAudioContext(2, buffer.length, config.sampleRate);
   const source = context.createBufferSource();
-  const input = context.createGain();
-  const sum = context.createGain();
+  const driveGain = context.createGain();
   const lowShelf = createFilter(context, "lowshelf", 95);
   const body = createFilter(context, "peaking", 720, 0.62);
   const highShelf = createFilter(context, "highshelf", 6900);
   const color = context.createWaveShaper();
   const glue = context.createDynamicsCompressor();
-  const ceiling = context.createWaveShaper();
-  const thresholds = [-8, -10.5, -12, -10, -8.5];
-  const releases = [0.26, 0.19, 0.12, 0.075, 0.045];
 
   source.buffer = buffer;
-  input.gain.value = dbToGain(5 + config.violence * 7);
-  thresholds.forEach((threshold, bandIndex) => {
-    const band = createBandPath(context, input, bandIndex);
-    const compressor = context.createDynamicsCompressor();
-    const makeup = context.createGain();
-    compressor.threshold.value = threshold;
-    compressor.knee.value = bandIndex === 2 ? 3 : 1;
-    compressor.ratio.value = bandIndex === 2 ? 12 : 18;
-    compressor.attack.value = bandIndex < 2 ? 0.003 : 0.001;
-    compressor.release.value = releases[bandIndex];
-    makeup.gain.value = [1.08, 1.03, 0.97, 1.035, 1.08][bandIndex];
-    band.connect(compressor);
-    compressor.connect(makeup);
-    makeup.connect(sum);
+  const preDriveLimiter = createFiveBandLimiter(context, source, {
+    thresholdOffset: -1.5,
+    sumGain: 0.7,
   });
-  sum.gain.value = 0.64;
-  lowShelf.gain.value = 1.2 + config.violence * 0.9;
+  driveGain.gain.value = dbToGain(2.5 + config.violence * 2.5);
+  lowShelf.gain.value = 0.8 + config.violence * 0.55;
   body.gain.value = -0.8;
-  highShelf.gain.value = 1.4 + config.violence;
-  color.curve = makeSaturationCurve(2.1 + config.violence * 1.4, 0.62);
+  highShelf.gain.value = 0.9 + config.violence * 0.65;
+  color.curve = makeSaturationCurve(1.55 + config.violence * 0.9, 0.34);
   color.oversample = "4x";
-  glue.threshold.value = -8;
+  glue.threshold.value = -10;
   glue.knee.value = 5;
-  glue.ratio.value = 3;
+  glue.ratio.value = 2.5;
   glue.attack.value = 0.012;
-  glue.release.value = 0.16;
-  ceiling.curve = makeCeilingCurve(-1.2);
-  ceiling.oversample = "none";
-  source.connect(input);
-  connectSeries([sum, lowShelf, body, highShelf, color, glue, ceiling, context.destination]);
+  glue.release.value = 0.18;
+  connectSeries([preDriveLimiter, driveGain, lowShelf, body, highShelf, color, glue]);
+  const postColorLimiter = createFiveBandLimiter(context, glue, {
+    thresholdOffset: 1,
+    sumGain: 0.74,
+  });
+  postColorLimiter.connect(context.destination);
   source.start();
   const rendered = await context.startRendering();
   assertActive(signal);
@@ -654,18 +668,22 @@ const createAssetMetrics = (metrics, buffer, extra = {}) => ({
   truePeakDb: metrics?.truePeakDb ?? null,
   dcDb: metrics?.dcDb ?? null,
   spectralFlatness: metrics?.spectralFlatness ?? null,
+  maxSampleDelta: metrics?.maxSampleDelta ?? null,
+  clickCount: metrics?.clickCount ?? null,
   peakTime: extra.peakTime ?? buffer.duration * 0.5,
 });
 
 const qualityPassed = (metrics) => (
   metrics
   && Number.isFinite(metrics.lufs)
-  && metrics.lufs >= -10.5
-  && metrics.lufs <= -7
+  && metrics.lufs >= -13.8
+  && metrics.lufs <= -9.2
   && Number.isFinite(metrics.truePeakDb)
-  && metrics.truePeakDb <= -0.8
+  && metrics.truePeakDb <= -1
   && Number.isFinite(metrics.dcDb)
   && metrics.dcDb <= -48
+  && Number.isFinite(metrics.maxSampleDelta)
+  && metrics.maxSampleDelta <= 0.82
 );
 
 export const runForgeRoll = async (configuration = {}, callbacks = {}) => {
@@ -705,22 +723,44 @@ export const runForgeRoll = async (configuration = {}, callbacks = {}) => {
       const seed = hashForgeSeed(dna.seed + index * 0x9e3779b9);
       emit("SOURCE", index, config.sourceCount, "SYNTHESIS");
       const source = await renderSource(config, dna, seed, index, signal);
-      const tonal = await dsp.run("tonal", source.buffer, {
-        amount: config.tonal,
-        floorDb: -24,
-        residualMix: 0.12 + (1 - config.tonal) * 0.16,
+      const extracted = await dsp.run("cleanup", source.buffer, {
+        amount: 0.76 + config.tonal * 0.18,
+        floorDb: -36,
+        residualMix: 0.07 + (1 - config.tonal) * 0.08,
         lowProtectHz: 125,
-        driveDb: 5 + config.violence * 6,
-        colorMix: 0.55 + config.violence * 0.2,
-        transient: 0.7 + config.violence * 0.55,
+        timeRadius: 5,
+        frequencyRadius: 4,
+        maskPower: 4,
+        residualBias: 1.45,
       }, signal, (phase, progress) => emit(
         "SOURCE",
         index,
         config.sourceCount,
         phase.toUpperCase(),
-        0.25 + progress * 0.7,
+        0.2 + progress * 0.42,
       ));
-      source.buffer = tonal.buffer;
+      const colored = await dsp.run("color", extracted.buffer, {
+        driveDb: 2.5 + config.violence * 3.5,
+        colorMix: 0.28 + config.violence * 0.14,
+        transient: 0.28 + config.violence * 0.3,
+      }, signal);
+      const polished = await dsp.run("cleanup", colored.buffer, {
+        amount: 0.28 + config.tonal * 0.2,
+        floorDb: -38,
+        residualMix: 0.08,
+        lowProtectHz: 115,
+        timeRadius: 4,
+        frequencyRadius: 3,
+        maskPower: 4,
+        residualBias: 1.3,
+      }, signal, (phase, progress) => emit(
+        "SOURCE",
+        index,
+        config.sourceCount,
+        `POST ${phase.toUpperCase()}`,
+        0.68 + progress * 0.26,
+      ));
+      source.buffer = polished.buffer;
       sources.push(source);
       emit("SOURCE", index + 1, config.sourceCount, "READY");
     }
@@ -730,22 +770,44 @@ export const runForgeRoll = async (configuration = {}, callbacks = {}) => {
       const seed = hashForgeSeed(dna.seed + 0x51ed270b + index * 0x85ebca6b);
       emit("WHOOSH", index, config.whooshCount, "DOPPLER");
       const whoosh = await renderWhoosh(config, dna, sources, seed, index, signal);
-      const sweetened = await dsp.run("tonal", whoosh.buffer, {
-        amount: 0.22 + config.tonal * 0.24,
-        floorDb: -18,
-        residualMix: 0.22,
+      const extracted = await dsp.run("cleanup", whoosh.buffer, {
+        amount: 0.52 + config.tonal * 0.25,
+        floorDb: -34,
+        residualMix: 0.12,
         lowProtectHz: 95,
-        driveDb: 3 + config.violence * 4,
-        colorMix: 0.42,
-        transient: 0.45 + config.violence * 0.35,
+        timeRadius: 5,
+        frequencyRadius: 4,
+        maskPower: 4,
+        residualBias: 1.42,
       }, signal, (phase, progress) => emit(
         "WHOOSH",
         index,
         config.whooshCount,
         phase.toUpperCase(),
-        0.58 + progress * 0.35,
+        0.46 + progress * 0.28,
       ));
-      whoosh.buffer = sweetened.buffer;
+      const colored = await dsp.run("color", extracted.buffer, {
+        driveDb: 1.8 + config.violence * 2.4,
+        colorMix: 0.2 + config.violence * 0.1,
+        transient: 0.2 + config.violence * 0.2,
+      }, signal);
+      const polished = await dsp.run("cleanup", colored.buffer, {
+        amount: 0.2 + config.tonal * 0.2,
+        floorDb: -38,
+        residualMix: 0.1,
+        lowProtectHz: 90,
+        timeRadius: 4,
+        frequencyRadius: 3,
+        maskPower: 4,
+        residualBias: 1.28,
+      }, signal, (phase, progress) => emit(
+        "WHOOSH",
+        index,
+        config.whooshCount,
+        `POST ${phase.toUpperCase()}`,
+        0.76 + progress * 0.2,
+      ));
+      whoosh.buffer = polished.buffer;
       whoosh.wavBlob = await dsp.run("encode", whoosh.buffer, {}, signal);
       whoosh.metrics = createAssetMetrics(null, whoosh.buffer, {
         peakTime: whoosh.duration * whoosh.peakRatio,
@@ -770,10 +832,14 @@ export const runForgeRoll = async (configuration = {}, callbacks = {}) => {
         emit("MASTER", index, config.outputCount, attempt ? "QUALITY RETRY" : "LAYER");
         const layerMix = await renderLayerMix(config, dna, whooshes, seed, duration, signal);
         const cleaned = await dsp.run("cleanup", layerMix.buffer, {
-          amount: 0.18 + config.tonal * 0.28,
-          floorDb: -18,
-          residualMix: 0.24,
+          amount: 0.48 + config.tonal * 0.25,
+          floorDb: -34,
+          residualMix: 0.12,
           lowProtectHz: 90,
+          timeRadius: 5,
+          frequencyRadius: 4,
+          maskPower: 4,
+          residualBias: 1.45,
         }, signal, (phase, progress) => emit(
           "MASTER",
           index,
@@ -783,8 +849,24 @@ export const runForgeRoll = async (configuration = {}, callbacks = {}) => {
         ));
         emit("MASTER", index, config.outputCount, "5-BAND", 0.5);
         const limited = await renderFinalBus(config, cleaned.buffer, signal);
-        const finished = await dsp.run("finish", limited, {
-          targetLufs: -8.5,
+        const postColor = await dsp.run("cleanup", limited, {
+          amount: 0.22 + config.tonal * 0.22,
+          floorDb: -38,
+          residualMix: 0.1,
+          lowProtectHz: 85,
+          timeRadius: 4,
+          frequencyRadius: 3,
+          maskPower: 4,
+          residualBias: 1.32,
+        }, signal, (phase, progress) => emit(
+          "MASTER",
+          index,
+          config.outputCount,
+          `POST ${phase.toUpperCase()}`,
+          0.62 + progress * 0.2,
+        ));
+        const finished = await dsp.run("finish", postColor.buffer, {
+          targetLufs: -9.5,
           violence: config.violence,
         }, signal);
         master = {
