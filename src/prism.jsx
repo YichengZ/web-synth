@@ -2,6 +2,7 @@ import React from "react";
 import * as ReactDOM from "react-dom/client";
 import "./styles.css";
 import { createWavRecorder } from "./recording.js";
+import { createPreviewAudioContext } from "./audio-runtime.js";
 import { isTypingTarget, usePersistentState, useRecordingClock } from "./hooks.js";
 
 const { useState, useEffect, useRef, useCallback } = React;
@@ -262,8 +263,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 
       const initAudio = useCallback(() => {
         if (!audioCtxRef.current) {
-          const AudioContext = window.AudioContext || window.webkitAudioContext;
-          const ctx = new AudioContext({ sampleRate: 96000 });
+          const ctx = createPreviewAudioContext();
 
           // --- BUILD GLOBAL FX GRAPH (ONCE) ---
 
@@ -771,7 +771,7 @@ const { useState, useEffect, useRef, useCallback } = React;
                     <Hexagon className="w-6 h-6 text-white animate-pulse" />
                     <div>
                       <h1 className="text-xl font-bold tracking-tight text-white">PRISM <span className="text-pink-300">PRO</span></h1>
-                      <p className="text-[10px] text-slate-500 font-mono tracking-widest">96KHz 24-BIT STUDIO</p>
+                      <p className="text-[10px] text-slate-500 font-mono tracking-widest">{Math.round((audioCtxRef.current?.sampleRate || 48000) / 1000)}KHz 24-BIT PREVIEW</p>
                     </div>
                   </div>
                   <a href="index.html" aria-label="Back to AI Synth Lab" className="lg:hidden h-9 px-3 rounded-lg border border-slate-800 text-slate-400 flex items-center gap-2 text-[10px] font-bold tracking-widest">

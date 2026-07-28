@@ -8,6 +8,7 @@ const synths = [
   { name: "Kawaii", path: "/KawaiiSynth.html" },
   { name: "TITAN", path: "/TITAN_SUB.html" },
   { name: "CONVERGENCE", path: "/Convergence.html" },
+  { name: "CONVERGENCE FORGE", path: "/ConvergenceForge.html" },
 ];
 
 const getWavPeak = (wav) => {
@@ -105,7 +106,7 @@ test("CONVERGENCE switches between all master bus presets", async ({ page }) => 
   await expect(page.getByText("OTT > CLIP")).toBeVisible();
 });
 
-test("CONVERGENCE initializes tonal worklets at 96 kHz", async ({ page }) => {
+test("CONVERGENCE initializes the stable 48 kHz preview graph", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
@@ -113,9 +114,88 @@ test("CONVERGENCE initializes tonal worklets at 96 kHz", async ({ page }) => {
   });
   await page.goto("/Convergence.html");
   await page.getByRole("button", { name: "Generate convergence burst" }).click();
-  await expect(page.getByText("96 KHZ")).toHaveText("96 KHZ");
-  await expect(page.getByText(/COLOR > TONAL/)).toHaveCount(3);
+  await expect(page.getByText("48 KHZ")).toHaveText("48 KHZ");
+  await expect(page.getByText(/COLOR > SHARED TONAL/)).toHaveCount(3);
   expect(errors).toEqual([]);
+});
+
+test("CONVERGENCE preview clock stays real time and suspends when idle", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "Realtime performance is measured once on desktop.");
+  await page.addInitScript(() => {
+    const NativeAudioContext = window.AudioContext;
+    window.AudioContext = class TestAudioContext extends NativeAudioContext {
+      constructor(...args) {
+        super(...args);
+        window.__testAudioContext = this;
+      }
+    };
+  });
+  await page.goto("/Convergence.html");
+  await page.getByLabel("Density").fill("1");
+  await page.getByRole("button", { name: "Generate convergence burst" }).click();
+  await page.waitForTimeout(1200);
+  const start = await page.evaluate(() => ({
+    audio: window.__testAudioContext.currentTime,
+    wall: performance.now(),
+  }));
+  await page.waitForTimeout(3000);
+  const ratio = await page.evaluate(({ audio, wall }) => (
+    (window.__testAudioContext.currentTime - audio) / ((performance.now() - wall) / 1000)
+  ), start);
+  expect(ratio).toBeGreaterThan(0.98);
+  await page.getByRole("button", { name: "Stop all convergence voices" }).click();
+  await expect.poll(
+    () => page.evaluate(() => window.__testAudioContext.state),
+    { timeout: 4000 },
+  ).toBe("suspended");
+});
+
+test("CONVERGENCE FORGE completes, previews, downloads, and captures at 96 kHz", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "The offline render pipeline is covered once on desktop.");
+  test.setTimeout(120_000);
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error" || message.type() === "warning") errors.push(message.text());
+  });
+  await page.goto("/ConvergenceForge.html?forgeTest=1");
+  await page.getByRole("button", { name: /ROLL/ }).click();
+  await expect(page.getByText("COMPLETE / SESSION READY")).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByRole("button", { name: /^WHOOSH 2$/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^MASTER 1$/ })).toBeVisible();
+  await page.getByRole("button", { name: /^MASTER 1$/ }).click();
+
+  const directDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download master-01" }).click();
+  const directWav = await readFile(await (await directDownload).path());
+  expect(directWav.readUInt32LE(24)).toBe(96_000);
+  expect(directWav.readUInt16LE(34)).toBe(24);
+  expect(getWavPeak(directWav)).toBeLessThan(0.9);
+
+  await page.getByRole("button", { name: "Play master-01" }).click();
+  await page.getByRole("button", { name: "REC SET" }).click();
+  await page.getByRole("button", { name: "Trigger master-01" }).click();
+  await page.waitForTimeout(350);
+  const captureDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: /^STOP \d{2}:\d{2}$/ }).click();
+  const captureWav = await readFile(await (await captureDownload).path());
+  expect(captureWav.readUInt32LE(24)).toBe(96_000);
+  expect(captureWav.readUInt16LE(34)).toBe(24);
+  expect(captureWav.length).toBeGreaterThan(20_000);
+  await page.getByRole("button", { name: "Clear roll" }).click();
+  await expect(page.getByRole("button", { name: /^WHOOSH 0$/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^MASTER 0$/ })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("CONVERGENCE FORGE cancels between offline stages", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "The offline cancellation path is covered once on desktop.");
+  await page.goto("/ConvergenceForge.html?forgeTest=1");
+  await page.getByRole("button", { name: /ROLL/ }).click();
+  await page.getByRole("button", { name: /Cancel/ }).click();
+  await expect(page.getByText("CANCELLED / MEMORY RELEASED")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: /^WHOOSH 0$/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^MASTER 0$/ })).toBeVisible();
 });
 
 test("CONVERGENCE advances seeds and varies scene gestures", async ({ page }) => {
@@ -183,7 +263,11 @@ test("CONVERGENCE recovers after extreme overlapping bursts", async ({ page }, t
   const burst = page.getByRole("button", { name: "Generate convergence burst" });
   await page.getByRole("button", { name: "REC WAV", exact: true }).click();
   for (let index = 0; index < 10; index += 1) {
-    await burst.click();
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      await burst.click();
+      if (await burst.isDisabled()) break;
+      await page.waitForTimeout(100);
+    }
     await expect(burst).toBeDisabled();
     await page.waitForTimeout(430);
     await expect(burst).toBeEnabled();
@@ -303,7 +387,7 @@ test.describe("recording", () => {
       const duration = (wav.length - 44) / (channels * (bitDepth / 8) * sampleRate);
       expect(channels).toBe(2);
       expect(bitDepth).toBe(24);
-      expect(sampleRate).toBe(96_000);
+      expect(sampleRate).toBe(48_000);
       expect(duration).toBeGreaterThan(0.18);
 
       const peak = getWavPeak(wav);

@@ -20,4 +20,4 @@ Keyboard controls inside each synth:
 - R: start or stop WAV recording
 - Escape: stop the PRISM sequencer, active TITAN voice, or CONVERGENCE scene
 
-All instruments request 96kHz processing. Recordings are stereo 24-bit WAV files and use the actual sample rate accepted by the browser. Recording automatically stops and downloads at the 5-minute safety limit.
+Live instruments use stable 48kHz preview processing. CONVERGENCE FORGE renders and captures final assets at 96kHz. Recordings are stereo 24-bit WAV files and automatically stop and download at the 5-minute safety limit.

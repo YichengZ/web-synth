@@ -1,4 +1,5 @@
 import { createWavRecorder } from "./recording.js";
+import { createPreviewAudioContext } from "./audio-runtime.js";
 
 const DSP_WORKLET_URL = new URL("./tonal-denoiser.worklet.js", import.meta.url);
 const SCALES = {
@@ -15,6 +16,7 @@ const OTT_CROSSOVERS = [140, 1050, 4800];
 const MAX_ACTIVE_SCENES = 2;
 const MAX_ACTIVE_EFFECT_RACKS = 9;
 export const BURST_COOLDOWN_MS = 420;
+const BURST_AUDIO_COOLDOWN_SECONDS = 0.38;
 const TITAN_GESTURES = ["DROP", "RISE", "PULSE", "BOUNCE", "GLIDE"];
 const KAWAII_GESTURES = ["PLUCK", "STAB", "CHORD", "BEND", "PULSE"];
 const PRISM_GESTURES = ["SHARD", "RIBBON", "SWELL", "CASCADE", "PULSE"];
@@ -674,14 +676,16 @@ const createEarlyFxRack = (engine, dna, stem, destination, startTime, cleanupTim
     spread: stem === "titan" ? 0.18 + rng() * 0.42 : 0.45 + rng() * 0.52,
     seed: hashSeed(dna.seed + Math.floor(rng() * 0xffffffff)),
   };
-  const granular = createGranularDelay(ctx, workletsReady, grainSettings);
+  // One shared granular Worklet runs after the preview stem mix. Scene racks
+  // keep a native delay here so randomized movement remains inexpensive.
+  const granular = createGranularDelay(ctx, false, grainSettings);
   const granularWet = ctx.createGain();
   const modToGranular = ctx.createGain();
   const granularToDisperser = ctx.createGain();
   const disperserSplitter = ctx.createChannelSplitter(2);
   const disperserMerger = ctx.createChannelMerger(2);
   const disperserWet = ctx.createGain();
-  const allpassCount = 4 + Math.floor(rng() * 4);
+  const allpassCount = 2 + Math.floor(rng() * 3);
   const leftAllpasses = [];
   const rightAllpasses = [];
   const mixes = [0.055 + rng() * 0.25, 0.045 + rng() * 0.27, 0.055 + rng() * 0.25];
@@ -1262,7 +1266,9 @@ export class ConvergenceEngine {
     this.activeScenes = [];
     this.schedulingScene = null;
     this.lastBurstAt = Number.NEGATIVE_INFINITY;
+    this.lastBurstAudioTime = Number.NEGATIVE_INFINITY;
     this.driftTimer = null;
+    this.idleSuspendTimer = null;
     this.masterMode = "BRUTAL";
     this.masterDrive = 12;
     this.masterTone = 0.62;
@@ -1273,13 +1279,13 @@ export class ConvergenceEngine {
 
   async init() {
     if (!this.ctx) {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      this.ctx = new AudioContext({ sampleRate: 96000, latencyHint: "interactive" });
+      this.ctx = createPreviewAudioContext();
       if (this.ctx.state === "suspended") this.ctx.resume().catch(() => {});
       this.readyPromise = this.buildGraph();
     }
 
     await this.readyPromise;
+    this.cancelIdleSuspend();
     if (this.ctx.state === "suspended") await this.ctx.resume();
     return this;
   }
@@ -1294,12 +1300,38 @@ export class ConvergenceEngine {
       }
     }
 
+    this.stemMixBus = this.ctx.createGain();
     this.mixBus = this.ctx.createGain();
     this.mixBus.gain.value = 0.68;
-    this.stems = createStemBuses(this.ctx, this.mixBus, this.workletsReady);
+    this.stems = createStemBuses(this.ctx, this.stemMixBus, false);
     Object.entries(this.stemLevels).forEach(([stem, level]) => {
       this.stems[stem].level.gain.value = level;
     });
+    this.previewDry = this.ctx.createGain();
+    this.previewGrain = createGranularDelay(this.ctx, this.workletsReady, {
+      delayMs: 190,
+      grainMs: 72,
+      overlap: 2.4,
+      pitch: 1,
+      feedback: 0.14,
+      jitter: 0.28,
+      spread: 0.72,
+      seed: 0x53414645,
+    });
+    this.previewGrainWet = this.ctx.createGain();
+    this.previewDenoiser = createTonalDenoiser(this.ctx, this.workletsReady, {
+      amount: 0.48,
+      floorDb: -15,
+      lowPreserveHz: 135,
+    });
+    this.previewDry.gain.value = 0.94;
+    this.previewGrainWet.gain.value = 0.12;
+    this.stemMixBus.connect(this.previewDry);
+    this.previewDry.connect(this.mixBus);
+    this.stemMixBus.connect(this.previewGrain);
+    this.previewGrain.connect(this.previewGrainWet);
+    this.previewGrainWet.connect(this.mixBus);
+    this.mixBus.connect(this.previewDenoiser.input);
 
     this.multiband = createMultibandMaster(this.ctx);
     this.inflator = createInflatorMaster(this.ctx);
@@ -1309,7 +1341,7 @@ export class ConvergenceEngine {
     this.brutalModeGain = this.ctx.createGain();
     this.masterGain = this.ctx.createGain();
     this.analyser = this.ctx.createAnalyser();
-    this.analyser.fftSize = 4096;
+    this.analyser.fftSize = 2048;
     this.analyser.smoothingTimeConstant = 0.72;
     this.masterGain.gain.value = this.outputLevel;
     this.multibandModeGain.gain.value = this.masterMode === "MULTIBAND" ? 1 : 0;
@@ -1322,7 +1354,7 @@ export class ConvergenceEngine {
       BRUTAL: this.brutal.input,
     };
     this.connectedMasterInput = this.masterInputs[this.masterMode];
-    this.mixBus.connect(this.connectedMasterInput);
+    this.previewDenoiser.output.connect(this.connectedMasterInput);
     this.multiband.output.connect(this.multibandModeGain);
     this.inflator.output.connect(this.inflatorModeGain);
     this.brutal.output.connect(this.brutalModeGain);
@@ -1343,8 +1375,8 @@ export class ConvergenceEngine {
     if (!this.brutalModeGain) return;
     const nextInput = this.masterInputs[this.masterMode];
     if (nextInput !== this.connectedMasterInput) {
-      try { this.mixBus.disconnect(this.connectedMasterInput); } catch (error) { /* already disconnected */ }
-      this.mixBus.connect(nextInput);
+      try { this.previewDenoiser.output.disconnect(this.connectedMasterInput); } catch (error) { /* already disconnected */ }
+      this.previewDenoiser.output.connect(nextInput);
       this.connectedMasterInput = nextInput;
     }
     const time = this.ctx.currentTime;
@@ -1573,12 +1605,16 @@ export class ConvergenceEngine {
   burst(settings, seed) {
     const now = performance.now();
     if (now - this.lastBurstAt < BURST_COOLDOWN_MS) return null;
+    if (this.ctx.currentTime - this.lastBurstAudioTime < BURST_AUDIO_COOLDOWN_SECONDS) return null;
+    this.cancelIdleSuspend();
     this.lastBurstAt = now;
+    this.lastBurstAudioTime = this.ctx.currentTime;
     return this.scheduleScene(settings, seed, this.ctx.currentTime + 0.035, 1);
   }
 
   startDrift(settingsProvider, seed) {
     this.stopDrift();
+    this.cancelIdleSuspend();
     let currentSeed = hashSeed(seed);
     let nextSceneTime = this.ctx.currentTime + 0.04;
     const tick = () => {
@@ -1600,12 +1636,30 @@ export class ConvergenceEngine {
   stopAll() {
     this.stopDrift();
     this.lastBurstAt = Number.NEGATIVE_INFINITY;
+    this.lastBurstAudioTime = Number.NEGATIVE_INFINITY;
     [...this.activeScenes].forEach((scene) => this.retireScene(scene));
     const stopTime = this.ctx ? this.ctx.currentTime + 0.035 : 0;
     this.activeSources.forEach((source) => {
       try { source.stop(stopTime); } catch (error) { /* already stopped */ }
     });
     this.activeSources.clear();
+    this.scheduleIdleSuspend();
+  }
+
+  cancelIdleSuspend() {
+    if (this.idleSuspendTimer !== null) window.clearTimeout(this.idleSuspendTimer);
+    this.idleSuspendTimer = null;
+  }
+
+  scheduleIdleSuspend() {
+    this.cancelIdleSuspend();
+    if (!this.ctx || this.ctx.state === "closed") return;
+    this.idleSuspendTimer = window.setTimeout(() => {
+      this.idleSuspendTimer = null;
+      if (!this.activeSources.size && !this.driftTimer && this.ctx.state === "running") {
+        this.ctx.suspend().catch(() => {});
+      }
+    }, 2000);
   }
 
   getMeterState() {
@@ -1631,6 +1685,7 @@ export class ConvergenceEngine {
 
   destroy() {
     this.stopAll();
+    this.cancelIdleSuspend();
     this.recorder?.destroy();
     if (this.ctx && this.ctx.state !== "closed") this.ctx.close();
   }

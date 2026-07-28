@@ -15,6 +15,7 @@ export default defineConfig({
         kawaii: resolve(import.meta.dirname, "KawaiiSynth.html"),
         titan: resolve(import.meta.dirname, "TITAN_SUB.html"),
         convergence: resolve(import.meta.dirname, "Convergence.html"),
+        forge: resolve(import.meta.dirname, "ConvergenceForge.html"),
       },
     },
   },

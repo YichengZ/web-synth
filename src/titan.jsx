@@ -2,6 +2,7 @@ import React from "react";
 import * as ReactDOM from "react-dom/client";
 import "./styles.css";
 import { createWavRecorder } from "./recording.js";
+import { createPreviewAudioContext } from "./audio-runtime.js";
 import { isTypingTarget, usePersistentState, useRecordingClock } from "./hooks.js";
 
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
@@ -429,8 +430,7 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
             // Initial Setup - ONE TIME ONLY
             const initAudio = () => {
                 if (!audioCtxRef.current) {
-                    const AudioContext = window.AudioContext || window.webkitAudioContext;
-                    const ctx = new AudioContext({ sampleRate: 96000 });
+                    const ctx = createPreviewAudioContext();
                     audioCtxRef.current = ctx;
 
                     // --- SINGLETON MASTER CHAIN ---
@@ -724,7 +724,7 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
                         {isRecording && (
                             <div className="flex items-center gap-2 bg-red-500/10 px-3 py-1.5 rounded-full border border-red-500/50 record-pulse">
                                 <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                                <span className="text-[10px] font-bold text-red-300 tracking-widest">REC 96K · {recordingTime}</span>
+                                <span className="text-[10px] font-bold text-red-300 tracking-widest">REC {Math.round((audioCtxRef.current?.sampleRate || 48000) / 1000)}K · {recordingTime}</span>
                             </div>
                         )}
                         <div className="min-w-24 flex-1 max-w-40"><Slider label="INFLATOR %" value={inflatorAmt} min={0} max={100} step={1} onChange={setInflatorAmt} color="#a1a1aa" suffix="%" /></div>

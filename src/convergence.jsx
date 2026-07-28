@@ -173,9 +173,12 @@ const Convergence = () => {
     const context = canvas.getContext("2d");
     const bandColors = ["#f97316", "#fb7185", "#ec4899", "#a78bfa", "#22d3ee"];
 
-    const draw = () => {
+    let lastDrawAt = 0;
+    const draw = (timestamp = 0) => {
       animationRef.current = requestAnimationFrame(draw);
       if (document.hidden) return;
+      if (timestamp - lastDrawAt < 1000 / 24) return;
+      lastDrawAt = timestamp;
       const width = canvas.width;
       const height = canvas.height;
       analyser.getByteFrequencyData(frequencyData);
@@ -398,7 +401,7 @@ const Convergence = () => {
                   <div className="mb-4 flex items-center justify-between">
                     <div>
                       <div className="text-xs font-black" style={{ color: stem.color }}>{stem.name}</div>
-                      <div className="mt-1 font-mono text-[9px] text-zinc-600">{stem.range} / COLOR &gt; TONAL</div>
+                      <div className="mt-1 font-mono text-[9px] text-zinc-600">{stem.range} / COLOR &gt; SHARED TONAL</div>
                     </div>
                     <span className="h-2.5 w-2.5 rounded-full transition-shadow" style={{ backgroundColor: stem.color, opacity: 0.25 + activity[stem.id] * 0.75, boxShadow: activity[stem.id] > 0.2 ? `0 0 ${8 + activity[stem.id] * 16}px ${stem.color}` : "none" }} />
                   </div>
@@ -458,7 +461,7 @@ const Convergence = () => {
               </div>
               <div className="bg-[#090d14] p-3">
                 <div className="text-[9px] font-black text-zinc-600">FORMAT</div>
-                <div className="mt-1 font-mono text-xs text-zinc-200">96K / 24B</div>
+                <div className="mt-1 font-mono text-xs text-zinc-200">{ready ? Math.round(engineRef.current.ctx.sampleRate / 1000) : 48}K / 24B</div>
               </div>
             </div>
           </section>
